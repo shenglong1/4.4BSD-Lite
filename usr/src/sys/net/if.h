@@ -80,17 +80,26 @@ struct	ether_header;
  *
  * (Would like to call this struct ``if'', but C isn't PL/1.)
  */
-
+// interface whole info, 对应一个接口
 struct ifnet {
+
+	/***********实现信息**************/
+	// 接口类型，是SLIP或是lo
 	char	*if_name;		/* name, e.g. ``en'' or ``lo'' */
+	// 接口类型下的编号，比如是SLIP的第0个interface
+	short	if_unit;		/* sub-unit for lower level driver */
 	struct	ifnet *if_next;		/* all struct ifnets are chained */
 	struct	ifaddr *if_addrlist;	/* linked list of addresses per if */
-        int	if_pcount;		/* number of promiscuous listeners */
+
+	int	if_pcount;		/* number of promiscuous listeners */
 	caddr_t	if_bpf;			/* packet filter structure */
+
+	// 内核中这个接口的唯一标识
 	u_short	if_index;		/* numeric abbreviation for this if  */
-	short	if_unit;		/* sub-unit for lower level driver */
 	short	if_timer;		/* time 'til if_watchdog called */
 	short	if_flags;		/* up/down, broadcast, etc. */
+
+	/***********硬件信息**************/
 	struct	if_data {
 /* generic interface information */
 		u_char	ifi_type;	/* ethernet, tokenring, etc */
@@ -99,6 +108,8 @@ struct ifnet {
 		u_long	ifi_mtu;	/* maximum transmission unit */
 		u_long	ifi_metric;	/* routing metric (external only) */
 		u_long	ifi_baudrate;	/* linespeed */
+
+		/***********统计信息**************/
 /* volatile statistics */
 		u_long	ifi_ipackets;	/* packets received on interface */
 		u_long	ifi_ierrors;	/* input errors on interface */
@@ -113,6 +124,7 @@ struct ifnet {
 		u_long	ifi_noproto;	/* destined for unsupported protocol */
 		struct	timeval ifi_lastchange;/* last updated */
 	}	if_data;
+	/***********函数指针**************/
 /* procedure handles */
 	int	(*if_init)		/* init routine */
 		__P((int));
@@ -129,6 +141,8 @@ struct ifnet {
 		__P((int));		/* new autoconfig will permit removal */
 	int	(*if_watchdog)		/* timer routine */
 		__P((int));
+
+	/***********输出队列**************/
 	struct	ifqueue {
 		struct	mbuf *ifq_head;
 		struct	mbuf *ifq_tail;
@@ -156,6 +170,7 @@ struct ifnet {
 #define	if_noproto	if_data.ifi_noproto
 #define	if_lastchange	if_data.ifi_lastchange
 
+// ifnet.if_flags
 #define	IFF_UP		0x1		/* interface is up */
 #define	IFF_BROADCAST	0x2		/* broadcast address valid */
 #define	IFF_DEBUG	0x4		/* turn on debugging */
@@ -184,6 +199,7 @@ struct ifnet {
  * (defined above).  Entries are added to and deleted from these structures
  * by these macros, which should be called with ipl raised to splimp().
  */
+// todo: 接口输出队列的例程：用来控制ifnet.if_snd入队出队
 #define	IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
 #define	IF_ENQUEUE(ifq, m) { \

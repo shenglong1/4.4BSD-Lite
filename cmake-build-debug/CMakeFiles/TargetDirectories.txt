@@ -1,4 +1,4 @@
-E:/src/4.4BSD-Lite/cmake-build-debug/CMakeFiles/bsd_lite.dir
-E:/src/4.4BSD-Lite/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-E:/src/4.4BSD-Lite/cmake-build-debug/CMakeFiles/test.dir
-E:/src/4.4BSD-Lite/cmake-build-debug/CMakeFiles/edit_cache.dir
+E:/CLionProject/4.4BSD-Lite/cmake-build-debug/CMakeFiles/bsd_lite.dir
+E:/CLionProject/4.4BSD-Lite/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+E:/CLionProject/4.4BSD-Lite/cmake-build-debug/CMakeFiles/test.dir
+E:/CLionProject/4.4BSD-Lite/cmake-build-debug/CMakeFiles/edit_cache.dir

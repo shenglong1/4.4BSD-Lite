@@ -59,6 +59,12 @@
 #include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
+#include "../../include/math.h"
+#include "../net/route.h"
+#include "if_ether.h"
+#include "../sys/socket.h"
+#include "../../usr.bin/ftp/extern.h"
+#include "../../contrib/gdb-4.7.LBL/bfd/hosts/news.h"
 
 #define SIN(s) ((struct sockaddr_in *)s)
 #define SDL(s) ((struct sockaddr_dl *)s)

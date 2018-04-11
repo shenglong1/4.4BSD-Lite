@@ -46,6 +46,7 @@
 #include <sys/protosw.h>
 
 #include <vm/vm.h>
+#include "../sys/mbuf.h"
 
 extern	vm_map_t mb_map;
 struct	mbuf *mbutl;
@@ -156,6 +157,7 @@ m_reclaim()
  * These are also available as macros
  * for critical paths.
  */
+// type是指 mbuf.type, 数据类型
 struct mbuf *
 m_get(nowait, type)
 	int nowait, type;
@@ -587,6 +589,7 @@ extpacket:
 /*
  * Routine to copy from device local memory into mbufs.
  */
+// todo: 拷贝buff数据到mbufs,并且mbufs构成一个链?
 struct mbuf *
 m_devget(buf, totlen, off0, ifp, copy)
 	char *buf;

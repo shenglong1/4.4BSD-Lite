@@ -35,6 +35,9 @@
 
 #ifndef M_WAITOK
 #include <sys/malloc.h>
+#include "../../usr/src/sys/sys/types.h"
+#include "../../usr/src/sys/netiso/xebec/main.h"
+
 #endif
 
 /*
@@ -64,16 +67,20 @@
 #define	cltom(x)	((caddr_t)((u_int)mbutl + ((u_int)(x) << MCLSHIFT)))
 
 /* header at beginning of each mbuf: */
+// size 20 bytes
 struct m_hdr {
 	struct	mbuf *mh_next;		/* next buffer in chain */
 	struct	mbuf *mh_nextpkt;	/* next chain in queue/record */
 	int	mh_len;			/* amount of data in this mbuf */
 	caddr_t	mh_data;		/* location of data */
+	// data type
 	short	mh_type;		/* type of data in this mbuf */
+	// mbuf type
 	short	mh_flags;		/* flags; see below */
 };
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
+// size 8 bytes
 struct	pkthdr {
 	int	len;		/* total packet length */
 	struct	ifnet *rcvif;	/* rcv interface */
@@ -86,9 +93,11 @@ struct m_ext {
 	u_int	ext_size;		/* size of buffer, for ext_free */
 };
 
+// total size 128 bytes
 struct mbuf {
 	struct	m_hdr m_hdr;
 	union {
+
 		struct {
 			struct	pkthdr MH_pkthdr;	/* M_PKTHDR set */
 			union {
@@ -96,6 +105,7 @@ struct mbuf {
 				char	MH_databuf[MHLEN];
 			} MH_dat;
 		} MH;
+
 		char	M_databuf[MLEN];		/* !M_PKTHDR, !M_EXT */
 	} M_dat;
 };
@@ -345,9 +355,12 @@ struct mbstat {
 	u_long	m_clusters;	/* clusters obtained from page pool */
 	u_long	m_spare;	/* spare field */
 	u_long	m_clfree;	/* free clusters */
+
 	u_long	m_drops;	/* times failed to find space */
 	u_long	m_wait;		/* times waited for space */
 	u_long	m_drain;	/* times drained protocols for space */
+
+	// 下标就是mbuf.types
 	u_short	m_mtypes[256];	/* type specific mbuf allocations */
 };
 
