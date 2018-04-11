@@ -115,7 +115,7 @@ int	ledebug = 1;		/* console error messages */
  */
 struct	le_softc {
 	struct	arpcom sc_ac;	/* common Ethernet structures */
-#define	sc_if	sc_ac.ac_if	/* network-visible interface */
+#define	scjif	sc_ac.ac_if	/* network-visible interface */
 #define	sc_addr	sc_ac.ac_enaddr	/* hardware Ethernet address */
 	volatile struct	lereg1 *sc_r1;	/* LANCE registers */
 	volatile void *sc_r2;	/* dual-port RAM */

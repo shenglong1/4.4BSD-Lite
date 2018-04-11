@@ -46,6 +46,10 @@
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/if_types.h>
+#include "../../usr/src/contrib/calc-2.9.3t6/alloc.h"
+#include "../../usr/src/sys/sys/malloc.h"
+#include "../../usr/src/contrib/libg++-2.3/libg++/g++-include/memory.h"
+#include "../../usr/src/sys/sys/socket.h"
 
 int	ifqmaxlen = IFQ_MAXLEN;
 void	if_slowtimo __P((void *arg));
@@ -91,6 +95,8 @@ static char *sprint_d __P((u_int, char *, int));
  * Attach an interface to the
  * list of "active" interfaces.
  */
+// todo: 建立和初始化if_addrs+sockaddr_dl+sockaddr_dl,注册ifnet和if_addrs到两个链表中(ifnet*,ifnet_addrs*)
+// todo: ifp添加到ifnet*数组，新建ifaddr+sockaddr_dl+sockaddr_dl，并添加到ifnet_addrs*指针数组
 void
 if_attach(ifp)
 	struct ifnet *ifp;
@@ -104,12 +110,15 @@ if_attach(ifp)
 	static int if_indexlim = 8;
 	extern void link_rtrequest();
 
+	// 从ifnet开始,在ifnet* 一级指针数组中找空位放ifp
 	while (*p)
 		p = &((*p)->if_next);
 	*p = ifp;
 	ifp->if_index = ++if_index;
+
+	// 新建或扩展ifaddr* 一级指针数组, 由ifnet_addrs和q指向
 	if (ifnet_addrs == 0 || if_index >= if_indexlim) {
-		unsigned n = (if_indexlim <<= 1) * sizeof(ifa);
+		unsigned n = (if_indexlim <<= 1) * sizeof(ifa); // ifaddr* 一级指针数组, 两倍扩展
 		struct ifaddr **q = (struct ifaddr **)
 					malloc(n, M_IFADDR, M_WAITOK);
 		if (ifnet_addrs) {
@@ -121,6 +130,7 @@ if_attach(ifp)
 	/*
 	 * create a Link Level name for this device
 	 */
+	// todo: 计算ifaddr和两个sockaddr_dl的总大小
 	unitname = sprint_d((u_int)ifp->if_unit, workbuf, sizeof(workbuf));
 	namelen = strlen(ifp->if_name);
 	unitlen = strlen(unitname);
@@ -132,10 +142,13 @@ if_attach(ifp)
 	socksize = ROUNDUP(socksize);
 	if (socksize < sizeof(*sdl))
 		socksize = sizeof(*sdl);
-	ifasize = sizeof(*ifa) + 2 * socksize;
+	ifasize = sizeof(*ifa) + 2 * socksize; // todo: 计算ifaddr和两个sockaddr_dl的总大小
+
+	// todo: 如何设置两个sockaddr_dl
 	if (ifa = (struct ifaddr *)malloc(ifasize, M_IFADDR, M_WAITOK)) {
 		bzero((caddr_t)ifa, ifasize);
-		sdl = (struct sockaddr_dl *)(ifa + 1);
+
+		sdl = (struct sockaddr_dl *)(ifa + 1); // todo: move to first sockaddr_dl
 		sdl->sdl_len = socksize;
 		sdl->sdl_family = AF_LINK;
 		bcopy(ifp->if_name, sdl->sdl_data, namelen);
@@ -143,13 +156,15 @@ if_attach(ifp)
 		sdl->sdl_nlen = (namelen += unitlen);
 		sdl->sdl_index = ifp->if_index;
 		sdl->sdl_type = ifp->if_type;
+
 		ifnet_addrs[if_index - 1] = ifa;
 		ifa->ifa_ifp = ifp;
 		ifa->ifa_next = ifp->if_addrlist;
 		ifa->ifa_rtrequest = link_rtrequest;
-		ifp->if_addrlist = ifa;
+		ifp->if_addrlist = ifa; // 连接ifp和ifaddrs
 		ifa->ifa_addr = (struct sockaddr *)sdl;
-		sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl);
+
+		sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl); // todo: move to second sockaddr_dl
 		ifa->ifa_netmask = (struct sockaddr *)sdl;
 		sdl->sdl_len = masklen;
 		while (namelen != 0)

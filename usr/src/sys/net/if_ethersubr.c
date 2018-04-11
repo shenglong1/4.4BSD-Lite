@@ -58,6 +58,9 @@
 #include <netinet/in_var.h>
 #endif
 #include <netinet/if_ether.h>
+#include "../../../../sys/net/if_dl.h"
+#include "../../../../sys/net/if_types.h"
+#include "../../../../sys/sys/socket.h"
 
 #ifdef NS
 #include <netns/ns.h>

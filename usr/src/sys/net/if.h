@@ -239,15 +239,21 @@ struct ifnet {
  */
 struct ifaddr {
 	struct	sockaddr *ifa_addr;	/* address of interface */
+
+  // 点对点链路上的另一端的接口协议地址或指向一个广播网中分配给接口的广播地址
 	struct	sockaddr *ifa_dstaddr;	/* other end of p-to-p link */
 #define	ifa_broadaddr	ifa_dstaddr	/* broadcast address interface */
 	struct	sockaddr *ifa_netmask;	/* used to determine subnet */
 	struct	ifnet *ifa_ifp;		/* back-pointer to interface */
 	struct	ifaddr *ifa_next;	/* next address for interface */
+
+	// 路由查找相关
 	void	(*ifa_rtrequest)();	/* check or clean routes (+ or -)'d */
 	u_short	ifa_flags;		/* mostly rt_flags for cloning */
-	short	ifa_refcnt;		/* extra to malloc for link info */
 	int	ifa_metric;		/* cost of going out this interface */
+
+  // 本ifaddr的ref
+	short	ifa_refcnt;		/* extra to malloc for link info */
 #ifdef notdef
 	struct	rtentry *ifa_rt;	/* XXXX for ROUTETOIF ????? */
 #endif

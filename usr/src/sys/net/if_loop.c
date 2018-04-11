@@ -79,7 +79,7 @@ struct	ifnet loif;
 /* ARGSUSED */
 void
 loopattach(n)
-	int n;
+		int n;
 {
 	register struct ifnet *ifp = &loif;
 

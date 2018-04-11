@@ -99,6 +99,7 @@ static void start_init __P((struct proc *p, void *framep));
  * hard work is done in the lower-level initialization routines including
  * startup(), which does memory initialization and autoconfiguration.
  */
+// todo: 内核初始化函数!!!
 main(framep)
 	void *framep;
 {
@@ -127,7 +128,7 @@ main(framep)
 
 	vm_mem_init();
 	kmeminit();
-	cpu_startup();
+	cpu_startup(); // todo: 查找设备
 
 	/*
 	 * Create process 0 (the swapper).
@@ -219,7 +220,9 @@ main(framep)
 	shminit();
 #endif
 
+	// todo: network init
 	/* Attach pseudo-devices. */
+	// todo: attach函数建立ifnet结构,准确的说是ifnet专有化结构
 	for (pdev = pdevinit; pdev->pdev_attach != NULL; pdev++)
 		(*pdev->pdev_attach)(pdev->pdev_count);
 
@@ -228,8 +231,8 @@ main(framep)
 	 * until everything is ready.
 	 */
 	s = splimp();
-	ifinit();
-	domaininit();
+	ifinit(); 			/* init network interface */
+	domaininit();		/* init protocol domains */
 	splx(s);
 
 #ifdef GPROF
