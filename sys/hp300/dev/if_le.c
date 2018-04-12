@@ -37,6 +37,10 @@
 #if NLE > 0
 
 #include "bpfilter.h"
+#include "../../../usr/src/sys/netinet/if_ether.h"
+#include "../../../usr/src/sys/net/if.h"
+#include "../../../usr/src/contrib/bind-4.9.2/include/math.h"
+#include "../../../usr/src/sys/sys/mbuf.h"
 
 /*
  * AMD 7990 LANCE
@@ -429,7 +433,7 @@ lestart(ifp)
 		IF_DEQUEUE(&le->sc_if.if_snd, m);
 		if (m == 0)
 			return (0);
-		len = leput(le->sc_r2->ler2_tbuf[le->sc_tmd], m);
+		len = leput(le->sc_r2->ler2_tbuf[le->sc_tmd], m); // dequeue取数据m 放到硬件缓冲
 #if NBPFILTER > 0
 		/* 
 		 * If bpf is listening on this interface, let it 
@@ -630,6 +634,7 @@ lerint(unit)
 	le->sc_rmd = bix;
 }
 
+// todo: 从buf中解压出ether_header 和 data放到mbuf链，同时修改le_softc[unit]
 leread(unit, buf, len)
 	int unit;
 	char *buf;

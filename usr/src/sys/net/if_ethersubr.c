@@ -61,6 +61,12 @@
 #include "../../../../sys/net/if_dl.h"
 #include "../../../../sys/net/if_types.h"
 #include "../../../../sys/sys/socket.h"
+#include "../../contrib/bind-4.9.2/include/string.h"
+#include "../../../../sys/sys/mbuf.h"
+#include "../../../../sys/sys/malloc.h"
+#include "../../../../sys/hp300/include/param.h"
+#include "../../../../sys/hp300/include/psl.h"
+#include "../../../../sys/net/if.h"
 
 #ifdef NS
 #include <netns/ns.h>
@@ -114,6 +120,8 @@ ether_output(ifp, m0, dst, rt0)
 	if ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) != (IFF_UP|IFF_RUNNING))
 		senderr(ENETDOWN);
 	ifp->if_lastchange = time;
+
+	// 路由信息rt0检查
 	if (rt = rt0) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if (rt0 = rt = rtalloc1(dst, 1))
@@ -126,6 +134,7 @@ ether_output(ifp, m0, dst, rt0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
 				rtfree(rt); rt = rt0;
+
 			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway, 1);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
@@ -143,7 +152,7 @@ ether_output(ifp, m0, dst, rt0)
 		if (!arpresolve(ac, rt, m, dst, edst))
 			return (0);	/* if not yet resolved */
 		/* If broadcasting on a simplex interface, loopback a copy */
-		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX))
+		if ((m->m_flags & M_BCAST) && (ifp->if_flags & IFF_SIMPLEX)) // 广播需要复制一份数据放到本接口的输入队列中
 			mcopy = m_copy(m, 0, (int)M_COPYALL);
 		off = m->m_pkthdr.len - m->m_len;
 		type = ETHERTYPE_IP;
@@ -257,7 +266,10 @@ ether_output(ifp, m0, dst, rt0)
 		senderr(EAFNOSUPPORT);
 	}
 
+	// todo: 到这里，mbuf经过m_copy已经添加了ip/tcp首部，接下来添加以太网首部
 
+	// 如果是广播数据，刚才已经复制了mbuf，放到本接口lo队列中
+  // 注意：这里的mbuf不包含以太网首部
 	if (mcopy)
 		(void) looutput(ifp, mcopy, dst, rt);
 	/*
@@ -315,7 +327,7 @@ ether_input(ifp, eh, m)
 	struct arpcom *ac = (struct arpcom *)ifp;
 	int s;
 
-	if ((ifp->if_flags & IFF_UP) == 0) {
+	if ((ifp->if_flags & IFF_UP) == 0) { // 接口关闭了
 		m_freem(m);
 		return;
 	}
@@ -332,7 +344,7 @@ ether_input(ifp, eh, m)
 	switch (eh->ether_type) {
 #ifdef INET
 	case ETHERTYPE_IP:
-		schednetisr(NETISR_IP);
+		schednetisr(NETISR_IP); // todo: 中断
 		inq = &ipintrq;
 		break;
 
