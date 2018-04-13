@@ -209,6 +209,7 @@ slattach()
 	}
 }
 
+// 初始化一个sl_softc，主要是分配簇，设置成员指向簇
 static int
 slinit(sc)
 	register struct sl_softc *sc;
@@ -236,6 +237,7 @@ slinit(sc)
  * Attach the given tty to the first available sl unit.
  */
 /* ARGSUSED */
+// 绑定sl_softc和tty
 int
 slopen(dev, tp)
 	dev_t dev;
@@ -252,11 +254,12 @@ slopen(dev, tp)
 	if (tp->t_line == SLIPDISC)
 		return (0);
 
+  // 遍历sl_softc找到首个未使用的，来绑定tty
 	for (nsl = NSL, sc = sl_softc; --nsl >= 0; sc++)
 		if (sc->sc_ttyp == NULL) {
 			if (slinit(sc) == 0)
 				return (ENOBUFS);
-			tp->t_sc = (caddr_t)sc;
+			tp->t_sc = (caddr_t)sc; // tty和sl_softc相互指向
 			sc->sc_ttyp = tp;
 			sc->sc_if.if_baudrate = tp->t_ospeed;
 			ttyflush(tp, FREAD | FWRITE);
@@ -326,7 +329,7 @@ sltioctl(tp, cmd, data, flag)
 int
 sloutput(ifp, m, dst, rtp)
 	struct ifnet *ifp;
-	register struct mbuf *m;
+	register struct mbuf *m; // m 包含ip首部
 	struct sockaddr *dst;
 	struct rtentry *rtp;
 {
@@ -339,6 +342,7 @@ sloutput(ifp, m, dst, rtp)
 	 * `Cannot happen' (see slioctl).  Someday we will extend
 	 * the line protocol to support other address families.
 	 */
+	// 只支持 ipv4
 	if (dst->sa_family != AF_INET) {
 		printf("sl%d: af%d not supported\n", sc->sc_if.if_unit,
 			dst->sa_family);
@@ -347,6 +351,7 @@ sloutput(ifp, m, dst, rtp)
 		return (EAFNOSUPPORT);
 	}
 
+  // 要有tty
 	if (sc->sc_ttyp == NULL) {
 		m_freem(m);
 		return (ENETDOWN);	/* sort of */
@@ -357,11 +362,15 @@ sloutput(ifp, m, dst, rtp)
 		return (EHOSTUNREACH);
 	}
 	ifq = &sc->sc_if.if_snd;
-	ip = mtod(m, struct ip *);
+	ip = mtod(m, struct ip *); // 获取mbuf 数据部分的ip 首部
+	// 数据flag 和 接口flag check
 	if (sc->sc_if.if_flags & SC_NOICMP && ip->ip_p == IPPROTO_ICMP) {
 		m_freem(m);
 		return (ENETRESET);		/* XXX ? */
 	}
+
+  // 选queue，inqueue
+	// 根据mbuf数据中的 ip首部tos字段选择发送队列
 	if (ip->ip_tos & IPTOS_LOWDELAY)
 		ifq = &sc->sc_fastq;
 	s = splimp();
@@ -614,6 +623,7 @@ sl_btom(sc, len)
 /*
  * tty interface receiver interrupt.
  */
+// 控制字节放到簇中，簇满则丢弃数据，数据放到ip队列
 void
 slinput(c, tp)
 	register int c;
@@ -767,7 +777,9 @@ slinput(c, tp)
 		splx(s);
 		goto newpack;
 	}
-	if (sc->sc_mp < sc->sc_ep) {
+
+	// 普通数据到达这里
+	if (sc->sc_mp < sc->sc_ep) { // 簇中有空间
 		*sc->sc_mp++ = c;
 		sc->sc_escape = 0;
 		return;
