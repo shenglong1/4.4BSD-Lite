@@ -33,6 +33,8 @@
  *	@(#)in_var.h	8.1 (Berkeley) 6/10/93
  */
 
+#include "../../../../sys/net/if.h"
+
 /*
  * Interface address, Internet version.  One of these structures
  * is allocated for each interface with an Internet address.
@@ -43,16 +45,19 @@ struct in_ifaddr {
 	struct	ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define ia_flags	ia_ifa.ifa_flags
-					/* ia_{,sub}net{,mask} in host order */
-	u_long	ia_net;			/* network number of interface */
-	u_long	ia_netmask;		/* mask of net part */
-	u_long	ia_subnet;		/* subnet number, including net */
-	u_long	ia_subnetmask;		/* mask of subnet part */
-	struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
 	struct	in_ifaddr *ia_next;	/* next in list of internet addresses */
+					/* ia_{,sub}net{,mask} in host order */
+
 	struct	sockaddr_in ia_addr;	/* reserve space for interface name */
+	u_long	ia_net;			/* network number of interface */ // 不含子网号
+	u_long	ia_netmask;		/* mask of net part */ // 网络号掩码，不包含子网号
+	u_long	ia_subnet;		/* subnet number, including net */ // 网络号+子网号
+	u_long	ia_subnetmask;		/* mask of subnet part */ // 网络号+子网号的掩码
+
+  // 注意：这个广播地址是大网广播，不包含子网，即广播所有子网
+	struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
 	struct	sockaddr_in ia_dstaddr; /* reserve space for broadcast addr */
-#define	ia_broadaddr	ia_dstaddr
+#define	ia_broadaddr	ia_dstaddr // todo: 小网广播地址, ia_addr所在的本子络
 	struct	sockaddr_in ia_sockmask; /* reserve space for general netmask */
 	struct	in_multi *ia_multiaddrs; /* list of multicast addresses */
 };

@@ -41,6 +41,8 @@
 /*
  * Protocols
  */
+#include "../sys/types.h"
+
 #define	IPPROTO_IP		0		/* dummy for IP */
 #define	IPPROTO_ICMP		1		/* control message protocol */
 #define	IPPROTO_IGMP		2		/* group mgmt protocol */
@@ -121,11 +123,12 @@ struct in_addr {
 /*
  * Socket address, internet style.
  */
+// sizeof is 16
 struct sockaddr_in {
 	u_char	sin_len;
 	u_char	sin_family;
 	u_short	sin_port;
-	struct	in_addr sin_addr;
+	struct	in_addr sin_addr; // ip network order
 	char	sin_zero[8];
 };
 

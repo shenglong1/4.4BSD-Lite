@@ -53,6 +53,7 @@
 #include <netinet/ip_icmp.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
+#include "../../usr/src/sys/netinet/in_pcb.h"
 
 /*
  * UDP protocol implementation.

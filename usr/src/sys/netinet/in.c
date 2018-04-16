@@ -179,6 +179,7 @@ in_control(so, cmd, data, ifp)
 			if (ia->ia_ifp == ifp)
 				break;
 
+  // 根据ifp+data 找目标in_ifaddr, 有可能会新建in_ifaddr
 	switch (cmd) {
 
 	case SIOCAIFADDR:
@@ -201,7 +202,7 @@ in_control(so, cmd, data, ifp)
 
 		if (ifp == 0)
 			panic("in_control");
-		if (ia == (struct in_ifaddr *)0) {
+		if (ia == (struct in_ifaddr *)0) { // 没有目标in_ifaddr
 			oia = (struct in_ifaddr *)
 				malloc(sizeof *oia, M_IFADDR, M_WAITOK);
 			if (oia == (struct in_ifaddr *)NULL)
@@ -249,6 +250,7 @@ in_control(so, cmd, data, ifp)
 			return (EADDRNOTAVAIL);
 		break;
 	}
+	// 对目标in_ifaddr get/set
 	switch (cmd) {
 
 	case SIOCGIFADDR:
