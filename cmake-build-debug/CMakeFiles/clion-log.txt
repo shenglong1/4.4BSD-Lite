@@ -1,5 +1,5 @@
-"E:\Program Files\JetBrains\CLion 2017.2.2\bin\cmake\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - MinGW Makefiles" E:\CLionProject\4.4BSD-Lite
+"E:\Program Files\CLion 2017.2.2\bin\cmake\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - MinGW Makefiles" E:\src\4.4BSD-Lite
 -- CXX_FLAGS = -g -DCHECK_PTHREAD_RETURN_VALUE -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Werror -Wconversion -Wno-unused-parameter -Wold-style-cast -Woverloaded-virtual -Wpointer-arith -Wshadow -Wwrite-strings -march=native -O0
 -- Configuring done
 -- Generating done
--- Build files have been written to: E:/CLionProject/4.4BSD-Lite/cmake-build-debug
+-- Build files have been written to: E:/src/4.4BSD-Lite/cmake-build-debug

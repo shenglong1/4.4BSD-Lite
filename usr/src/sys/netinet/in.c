@@ -184,6 +184,7 @@ in_control(so, cmd, data, ifp)
 
 	case SIOCAIFADDR:
 	case SIOCDIFADDR:
+	  // 添加/update一个ip地址，或删除
 		if (ifra->ifra_addr.sin_family == AF_INET)
 		    for (oia = ia; ia; ia = ia->ia_next) {
 			if (ia->ia_ifp == ifp  &&
@@ -203,6 +204,7 @@ in_control(so, cmd, data, ifp)
 		if (ifp == 0)
 			panic("in_control");
 		if (ia == (struct in_ifaddr *)0) { // 没有目标in_ifaddr
+		  // 新建一个in_ifaddr + ifaddr
 			oia = (struct in_ifaddr *)
 				malloc(sizeof *oia, M_IFADDR, M_WAITOK);
 			if (oia == (struct in_ifaddr *)NULL)
@@ -213,7 +215,7 @@ in_control(so, cmd, data, ifp)
 					continue;
 				ia->ia_next = oia;
 			} else
-				in_ifaddr = oia;
+				in_ifaddr = oia; // in_ifaddr时空链表
 			ia = oia;
 			if (ifa = ifp->if_addrlist) {
 				for ( ; ifa->ifa_next; ifa = ifa->ifa_next)
@@ -238,7 +240,7 @@ in_control(so, cmd, data, ifp)
 		break;
 
 	case SIOCSIFBRDADDR:
-		if ((so->so_state & SS_PRIV) == 0)
+		if ((so->so_state & SS_PRIV) == 0) // 必须是root权限创建的fd才能设置
 			return (EPERM);
 		/* FALLTHROUGH */
 
@@ -278,7 +280,7 @@ in_control(so, cmd, data, ifp)
 			return (EINVAL);
 		oldaddr = ia->ia_dstaddr;
 		ia->ia_dstaddr = *(struct sockaddr_in *)&ifr->ifr_dstaddr;
-		if (ifp->if_ioctl && (error = (*ifp->if_ioctl)
+		if (ifp->if_ioctl && (error = (*ifp->if_ioctl) // 通知硬件
 					(ifp, SIOCSIFDSTADDR, (caddr_t)ia))) {
 			ia->ia_dstaddr = oldaddr;
 			return (error);
@@ -303,13 +305,15 @@ in_control(so, cmd, data, ifp)
 		    (struct sockaddr_in *) &ifr->ifr_addr, 1));
 
 	case SIOCSIFNETMASK:
+	  // 设置子网mask, ia_subnetmask/ia_sockmask
 		i = ifra->ifra_addr.sin_addr.s_addr;
 		ia->ia_subnetmask = ntohl(ia->ia_sockmask.sin_addr.s_addr = i);
 		break;
 
 	case SIOCAIFADDR:
+	  // insert/update一个单播地址
 		maskIsNew = 0;
-		hostIsNew = 1;
+		hostIsNew = 1; // 标识是insert或update
 		error = 0;
 		if (ia->ia_addr.sin_family == AF_INET) {
 			if (ifra->ifra_addr.sin_len == 0) {
@@ -320,7 +324,7 @@ in_control(so, cmd, data, ifp)
 				hostIsNew = 0;
 		}
 		if (ifra->ifra_mask.sin_len) {
-			in_ifscrub(ifp, ia);
+			in_ifscrub(ifp, ia); // 刷新路由表
 			ia->ia_sockmask = ifra->ifra_mask;
 			ia->ia_subnetmask =
 			     ntohl(ia->ia_sockmask.sin_addr.s_addr);
@@ -328,10 +332,11 @@ in_control(so, cmd, data, ifp)
 		}
 		if ((ifp->if_flags & IFF_POINTOPOINT) &&
 		    (ifra->ifra_dstaddr.sin_family == AF_INET)) {
-			in_ifscrub(ifp, ia);
+			in_ifscrub(ifp, ia); // 刷新路由表
 			ia->ia_dstaddr = ifra->ifra_dstaddr;
 			maskIsNew  = 1; /* We lie; but the effect's the same */
 		}
+		// 如果req中地址是新的，insert
 		if (ifra->ifra_addr.sin_family == AF_INET &&
 		    (hostIsNew || maskIsNew))
 			error = in_ifinit(ifp, ia, &ifra->ifra_addr, 0);
@@ -341,6 +346,7 @@ in_control(so, cmd, data, ifp)
 		return (error);
 
 	case SIOCDIFADDR:
+	  // 更新路由表，从ifnet.if_addrlist链和in_ifaddr链中删除这个in_ifaddr节点
 		in_ifscrub(ifp, ia);
 		if ((ifa = ifp->if_addrlist) == (struct ifaddr *)ia)
 			ifp->if_addrlist = ifa->ifa_next;
@@ -414,14 +420,16 @@ in_ifinit(ifp, ia, sin, scrub)
 	 * if this is its first address,
 	 * and to validate the address if necessary.
 	 */
+	// 优先给接口层协议相关 例程处理
+	// todo: 交给硬件处理
 	if (ifp->if_ioctl &&
 	    (error = (*ifp->if_ioctl)(ifp, SIOCSIFADDR, (caddr_t)ia))) {
 		splx(s);
-		ia->ia_addr = oldaddr;
+		ia->ia_addr = oldaddr; // 发生错误，就恢复ia ip
 		return (error);
 	}
 	if (ifp->if_output == ether_output) { /* XXX: Another Kludge */
-		ia->ia_ifa.ifa_rtrequest = arp_rtrequest;
+		ia->ia_ifa.ifa_rtrequest = arp_rtrequest; // 设置arp函数
 		ia->ia_ifa.ifa_flags |= RTF_CLONING;
 	}
 	splx(s);
@@ -430,6 +438,7 @@ in_ifinit(ifp, ia, sin, scrub)
 		in_ifscrub(ifp, ia);
 		ia->ia_ifa.ifa_addr = (struct sockaddr *)&ia->ia_addr;
 	}
+	// todo: set in_ifaddr 的net 和mask
 	if (IN_CLASSA(i))
 		ia->ia_netmask = IN_CLASSA_NET;
 	else if (IN_CLASSB(i))
@@ -449,13 +458,15 @@ in_ifinit(ifp, ia, sin, scrub)
 	ia->ia_net = i & ia->ia_netmask;
 	ia->ia_subnet = i & ia->ia_subnetmask;
 	in_socktrim(&ia->ia_sockmask);
+
 	/*
 	 * Add route for the network.
 	 */
+	// todo: 设置广播地址和mask
 	ia->ia_ifa.ifa_metric = ifp->if_metric;
 	if (ifp->if_flags & IFF_BROADCAST) {
 		ia->ia_broadaddr.sin_addr.s_addr =
-			htonl(ia->ia_subnet | ~ia->ia_subnetmask);
+			htonl(ia->ia_subnet | ~ia->ia_subnetmask); // 求subnet广播地址
 		ia->ia_netbroadcast.s_addr =
 			htonl(ia->ia_net | ~ ia->ia_netmask);
 	} else if (ifp->if_flags & IFF_LOOPBACK) {
@@ -466,6 +477,7 @@ in_ifinit(ifp, ia, sin, scrub)
 			return (0);
 		flags |= RTF_HOST;
 	}
+	// todo: 路由初始化?
 	if ((error = rtinit(&(ia->ia_ifa), (int)RTM_ADD, flags)) == 0)
 		ia->ia_flags |= IFA_ROUTE;
 	/*

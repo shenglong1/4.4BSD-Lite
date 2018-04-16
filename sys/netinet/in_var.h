@@ -39,30 +39,42 @@
  * The ifaddr structure contains the protocol-independent part
  * of the structure and is assumed to be first.
  */
+#include "../sys/types.h"
+#include "../net/if.h"
+
+// todo: 理解为专有化的ip地址？
 struct in_ifaddr {
-	struct	ifaddr ia_ifa;		/* protocol-independent info */
+		struct	ifaddr ia_ifa;		/* protocol-independent info */
 #define	ia_ifp		ia_ifa.ifa_ifp
 #define ia_flags	ia_ifa.ifa_flags
-					/* ia_{,sub}net{,mask} in host order */
-	u_long	ia_net;			/* network number of interface */
-	u_long	ia_netmask;		/* mask of net part */
-	u_long	ia_subnet;		/* subnet number, including net */
-	u_long	ia_subnetmask;		/* mask of subnet part */
-	struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
-	struct	in_ifaddr *ia_next;	/* next in list of internet addresses */
-	struct	sockaddr_in ia_addr;	/* reserve space for interface name */
-	struct	sockaddr_in ia_dstaddr; /* reserve space for broadcast addr */
+		/* ia_{,sub}net{,mask} in host order */
+		// 大网netid，mask
+		u_long	ia_net;			/* network number of interface */
+		u_long	ia_netmask;		/* mask of net part */
+		// 子网netid，mask
+		u_long	ia_subnet;		/* subnet number, including net */
+		u_long	ia_subnetmask;		/* mask of subnet part */
+
+		struct	in_ifaddr *ia_next;	/* next in list of internet addresses */
+
+		// ip
+		struct	sockaddr_in ia_addr;	/* reserve space for interface name */
+		// 大网广播地址
+		struct	in_addr ia_netbroadcast; /* to recognize net broadcasts */
+		// 小网广播地址, 或者使SLIP和PPP对端地址，或lo的127.0.0.1
+		struct	sockaddr_in ia_dstaddr; /* reserve space for broadcast addr */
 #define	ia_broadaddr	ia_dstaddr
-	struct	sockaddr_in ia_sockmask; /* reserve space for general netmask */
-	struct	in_multi *ia_multiaddrs; /* list of multicast addresses */
+		// 小网mask
+		struct	sockaddr_in ia_sockmask; /* reserve space for general netmask */
+		struct	in_multi *ia_multiaddrs; /* list of multicast addresses */
 };
 
 struct	in_aliasreq {
-	char	ifra_name[IFNAMSIZ];		/* if name, e.g. "en0" */
-	struct	sockaddr_in ifra_addr;
-	struct	sockaddr_in ifra_broadaddr;
+		char	ifra_name[IFNAMSIZ];		/* if name, e.g. "en0" */
+		struct	sockaddr_in ifra_addr;
+		struct	sockaddr_in ifra_broadaddr;
 #define ifra_dstaddr ifra_broadaddr
-	struct	sockaddr_in ifra_mask;
+		struct	sockaddr_in ifra_mask;
 };
 /*
  * Given a pointer to an in_ifaddr (ifaddr),
@@ -72,7 +84,7 @@ struct	in_aliasreq {
 
 #define IN_LNAOF(in, ifa) \
 	((ntohl((in).s_addr) & ~((struct in_ifaddr *)(ifa)->ia_subnetmask))
-			
+
 
 #ifdef	KERNEL
 extern	struct	in_ifaddr *in_ifaddr;
@@ -119,12 +131,12 @@ void	in_socktrim __P((struct sockaddr_in *));
  * structure.
  */
 struct in_multi {
-	struct	in_addr inm_addr;	/* IP multicast address */
-	struct	ifnet *inm_ifp;		/* back pointer to ifnet */
-	struct	in_ifaddr *inm_ia;	/* back pointer to in_ifaddr */
-	u_int	inm_refcount;		/* no. membership claims by sockets */
-	u_int	inm_timer;		/* IGMP membership report timer */
-	struct	in_multi *inm_next;	/* ptr to next multicast address */
+		struct	in_addr inm_addr;	/* IP multicast address */
+		struct	ifnet *inm_ifp;		/* back pointer to ifnet */
+		struct	in_ifaddr *inm_ia;	/* back pointer to in_ifaddr */
+		u_int	inm_refcount;		/* no. membership claims by sockets */
+		u_int	inm_timer;		/* IGMP membership report timer */
+		struct	in_multi *inm_next;	/* ptr to next multicast address */
 };
 
 #ifdef KERNEL

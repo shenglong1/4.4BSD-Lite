@@ -1,4 +1,4 @@
-# Install script for directory: E:/CLionProject/4.4BSD-Lite
+# Install script for directory: E:/src/4.4BSD-Lite
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -35,5 +35,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "E:/CLionProject/4.4BSD-Lite/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "E:/src/4.4BSD-Lite/cmake-build-debug/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
