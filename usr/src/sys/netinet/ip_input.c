@@ -104,22 +104,27 @@ static void save_rte __P((u_char *, struct in_addr));
  * IP initialization: fill in IP protocol switch table.
  * All protocols not implemented in kernel go to raw IP protocol handler.
  */
+// 初始化ip_protox[], ip输入队列
 void
 ip_init()
 {
 	register struct protosw *pr;
 	register int i;
 
-	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW);
+	// 初始化ip_protox[]
+	pr = pffindproto(PF_INET, IPPROTO_RAW, SOCK_RAW); // 先定位到protosw[3]
 	if (pr == 0)
 		panic("ip_init");
 	for (i = 0; i < IPPROTO_MAX; i++)
-		ip_protox[i] = pr - inetsw;
+		ip_protox[i] = pr - inetsw; // 第一趟：全部设置为3，这是默认序号
+	// 第二趟：遍历protosw[], 设置ip_protox[pr->pr_protocol] = offset
 	for (pr = inetdomain.dom_protosw;
 	    pr < inetdomain.dom_protoswNPROTOSW; pr++)
 		if (pr->pr_domain->dom_family == PF_INET &&
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
+
+	// 初始化ip输入队列
 	ipq.next = ipq.prev = &ipq;
 	ip_id = time.tv_sec & 0xffff;
 	ipintrq.ifq_maxlen = ipqmaxlen;

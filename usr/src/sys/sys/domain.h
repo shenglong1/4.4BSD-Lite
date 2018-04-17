@@ -51,8 +51,10 @@ struct	domain {
 		__P((struct mbuf *));
 	int	(*dom_dispose)		/* dispose of internalized rights */
 		__P((struct mbuf *));
+		// 指向本domain的protosw[]首尾
 	struct	protosw *dom_protosw, *dom_protoswNPROTOSW;
-	struct	domain *dom_next;
+	struct	domain *dom_next; // 构成domain链
+    // 路由初始化函数
 	int	(*dom_rtattach)		/* initialize routing table */
 		__P((void **, int));
 	int	dom_rtoffset;		/* an arg to rtattach, in bits */

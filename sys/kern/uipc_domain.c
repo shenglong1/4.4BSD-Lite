@@ -44,6 +44,7 @@
 #include <sys/proc.h>
 #include <vm/vm.h>
 #include <sys/sysctl.h>
+#include <i386/include/param.h>
 
 void	pffasttimo __P((void *));
 void	pfslowtimo __P((void *));
@@ -54,6 +55,7 @@ void	pfslowtimo __P((void *));
 	domains = &__CONCAT(x,domain); \
 }
 
+// todo: 初始化全局的domain链和所有protosw数组, 启动定时器
 domaininit()
 {
 	register struct domain *dp;
@@ -89,10 +91,13 @@ domaininit()
 				(*pr->pr_init)();
 	}
 
+  // todo: 这里设置mbuf中协议部分header(Link,ip,tcp)预留地址，并计算单个mbuf中最大数据长度
 if (max_linkhdr < 16)		/* XXX */
 max_linkhdr = 16;
 	max_hdr = max_linkhdr + max_protohdr;
 	max_datalen = MHLEN - max_hdr;
+
+	// 启动两个timeout
 	timeout(pffasttimo, (void *)0, 1);
 	timeout(pfslowtimo, (void *)0, 1);
 }
@@ -141,6 +146,7 @@ found:
 	return (maybe);
 }
 
+// todo: 将sysctl请求通知给具体的protosw, call protosw.pr_sysctl
 net_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	int *name;
 	u_int namelen;
@@ -164,6 +170,7 @@ net_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	family = name[0];
 	protocol = name[1];
 
+	// 找目标domain
 	if (family == 0)
 		return (0);
 	for (dp = domains; dp; dp = dp->dom_next)
@@ -171,6 +178,7 @@ net_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 			goto found;
 	return (ENOPROTOOPT);
 found:
+	// 找目标protocol编号protosw
 	for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 		if (pr->pr_protocol == protocol && pr->pr_sysctl)
 			return ((*pr->pr_sysctl)(name + 2, namelen - 2,
@@ -198,10 +206,13 @@ pfslowtimo(arg)
 	register struct domain *dp;
 	register struct protosw *pr;
 
+  // 执行功能：call所有domain和protosw的超时函数
+  // 也可以理解为通知所有protosw超时了
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_slowtimo)
 				(*pr->pr_slowtimo)();
+	// 再次预定时钟
 	timeout(pfslowtimo, (void *)0, hz/2);
 }
 
@@ -212,9 +223,12 @@ pffasttimo(arg)
 	register struct domain *dp;
 	register struct protosw *pr;
 
+	// 执行功能：call所有domain和protosw的超时函数
+	// 也可以理解为通知所有protosw超时了
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_fasttimo)
 				(*pr->pr_fasttimo)();
+	// 再次预定时钟
 	timeout(pffasttimo, (void *)0, hz/5);
 }

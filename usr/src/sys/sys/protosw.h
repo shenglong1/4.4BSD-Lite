@@ -56,23 +56,29 @@
  * described below.
  */
 struct protosw {
-	short	pr_type;		/* socket type used for */
-	struct	domain *pr_domain;	/* domain protocol a member of */
-	short	pr_protocol;		/* protocol number */
-	short	pr_flags;		/* see below */
+		short	pr_type;		/* socket type used for */ // SOCK_STREAM
+		struct	domain *pr_domain;	/* domain protocol a member of */
+		// 协议编号：用在 ip分组协议字段，ip_protox下标
+		short	pr_protocol;		/* protocol number in domain */
+		short	pr_flags;		/* see below */
 /* protocol-protocol hooks */
-	void	(*pr_input)();		/* input to protocol (from below) */
-	int	(*pr_output)();		/* output to protocol (from above) */
-	void	(*pr_ctlinput)();	/* control input (from below) */
-	int	(*pr_ctloutput)();	/* control output (from above) */
+    // 协议入口,协议相关的例程
+		void	(*pr_input)();		/* input to protocol (from below) */
+		int	(*pr_output)();		/* output to protocol (from above) */
+		void	(*pr_ctlinput)();	/* control input (from below) */
+		int	(*pr_ctloutput)();	/* control output (from above) */
 /* user-protocol hook */
-	int	(*pr_usrreq)();		/* user request: see list below */
+		int	(*pr_usrreq)();		/* user request: see list below */
 /* utility hooks */
-	void	(*pr_init)();		/* initialization hook */
-	void	(*pr_fasttimo)();	/* fast timeout (200ms) */
-	void	(*pr_slowtimo)();	/* slow timeout (500ms) */
-	void	(*pr_drain)();		/* flush any excess space possible */
-	int	(*pr_sysctl)();		/* sysctl for protocol */
+		// 协议其他函数
+		void	(*pr_init)();		/* initialization hook */
+		// domain初始化时启动timer，每次超时执行pr_fasttimo/prslowtimo
+		void	(*pr_fasttimo)();	/* fast timeout (200ms) */
+		void	(*pr_slowtimo)();	/* slow timeout (500ms) */
+		void	(*pr_drain)();		/* flush any excess space possible */
+
+		// todo: sysctl最终到这里
+		int	(*pr_sysctl)();		/* sysctl for protocol */
 };
 
 #define	PR_SLOWHZ	2		/* 2 slow timeouts per second */
