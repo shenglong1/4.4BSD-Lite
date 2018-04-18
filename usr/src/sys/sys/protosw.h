@@ -55,6 +55,8 @@
  * The userreq routine interfaces protocols to the system and is
  * described below.
  */
+// 纯方法struct
+// 代表一个协议的例程集合，并不包含数据，不对应某个具体设备或接口
 struct protosw {
 		short	pr_type;		/* socket type used for */ // SOCK_STREAM
 		struct	domain *pr_domain;	/* domain protocol a member of */

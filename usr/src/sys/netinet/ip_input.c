@@ -54,6 +54,23 @@
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
+#include "../sys/param.h"
+#include "../../../../sys/net/route.h"
+#include "../../../../sys/hp300/include/param.h"
+#include "../../../../sys/hp300/include/psl.h"
+#include "../../../../sys/net/if.h"
+#include "../../../../sys/sys/mbuf.h"
+#include "../../usr.sbin/timed/timed/extern.h"
+#include "../../../../sys/hp300/include/endian.h"
+#include "../../../../sys/hp300/stand/machine/endian.h"
+#include "../../../../sys/netinet/in_var.h"
+#include "../../../../sys/i386/include/endian.h"
+#include "../../../../sys/luna68k/stand/machine/endian.h"
+#include "../../../../sys/luna68k/include/endian.h"
+#include "../../../../sys/mips/include/endian.h"
+#include "../../../../sys/news3400/include/endian.h"
+#include "../../../../sys/pmax/include/endian.h"
+#include "../../../../sys/sparc/include/endian.h"
 
 #ifndef	IPFORWARDING
 #ifdef GATEWAY
@@ -142,6 +159,11 @@ struct	route ipforward_rt;
  * Ip input routine.  Checksum and byte swap header.  If fragmented
  * try to reassemble.  Process options.  Pass to next level.
  */
+// 读取ip输入队列
+// ( 1 )对到达分组验证
+// ( 2 )选项处理及转发
+// ( 3 )分组重装
+// ( 4 )分用
 void
 ipintr()
 {
@@ -172,6 +194,8 @@ next:
 	if (in_ifaddr == NULL)
 		goto bad;
 	ipstat.ips_total++;
+
+	// todo: 一系列长度和checksum检查
 	if (m->m_len < sizeof (struct ip) &&
 	    (m = m_pullup(m, sizeof (struct ip))) == 0) {
 		ipstat.ips_toosmall++;
@@ -182,7 +206,7 @@ next:
 		ipstat.ips_badvers++;
 		goto bad;
 	}
-	hlen = ip->ip_hl << 2;
+	hlen = ip->ip_hl << 2; // ip->ip_hl * 4 字节长度
 	if (hlen < sizeof(struct ip)) {	/* minimum header length */
 		ipstat.ips_badhlen++;
 		goto bad;
@@ -194,7 +218,7 @@ next:
 		}
 		ip = mtod(m, struct ip *);
 	}
-	if (ip->ip_sum = in_cksum(m, hlen)) {
+	if (ip->ip_sum = in_cksum(m, hlen)) { // perform ip头的校验算法
 		ipstat.ips_badsum++;
 		goto bad;
 	}
@@ -216,12 +240,14 @@ next:
 	 * Trim mbufs if longer than we expect.
 	 * Drop packet if shorter than we expect.
 	 */
-	if (m->m_pkthdr.len < ip->ip_len) {
+  // todo: 比较mbuf.pkthdr 和ip 分组声称的长度
+	if (m->m_pkthdr.len < ip->ip_len) { // 有ip分组数据丢失
 		ipstat.ips_tooshort++;
 		goto bad;
 	}
-	if (m->m_pkthdr.len > ip->ip_len) {
+	if (m->m_pkthdr.len > ip->ip_len) { // 链路层对原有ip添加了填充数据
 		if (m->m_len == m->m_pkthdr.len) {
+			// 该ip分组仅占一个mbuf时
 			m->m_len = ip->ip_len;
 			m->m_pkthdr.len = ip->ip_len;
 		} else
@@ -234,6 +260,7 @@ next:
 	 * error was detected (causing an icmp message
 	 * to be sent and the original packet to be freed).
 	 */
+	// todo: 有选项，处理选项
 	ip_nhops = 0;		/* for source routed packets */
 	if (hlen > sizeof (struct ip) && ip_dooptions(m))
 		goto next;
@@ -241,11 +268,15 @@ next:
 	/*
 	 * Check our list of addresses, to see if the packet is for us.
 	 */
-	for (ia = in_ifaddr; ia; ia = ia->ia_next) {
+  // todo: 判断分组是input还是forward
+	for (ia = in_ifaddr; ia; ia = ia->ia_next) { // 遍历本机所有接口的ip地址？
+		// todo: 一次完整的匹配过程，判断对此ip分组是input还是forward
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
 
 		if (IA_SIN(ia)->sin_addr.s_addr == ip->ip_dst.s_addr)
 			goto ours;
+
+		// 不是本host的, 检查是否是广播
 		if (
 #ifdef	DIRECTED_BROADCAST
 		    ia->ia_ifp == m->m_pkthdr.rcvif &&
@@ -255,13 +286,14 @@ next:
 
 			if (satosin(&ia->ia_broadaddr)->sin_addr.s_addr ==
 			    ip->ip_dst.s_addr)
-				goto ours;
+				goto ours; // 完全匹配本接口子网广播地址
 			if (ip->ip_dst.s_addr == ia->ia_netbroadcast.s_addr)
-				goto ours;
+				goto ours; // 完全匹配本接口大网广播地址
 			/*
 			 * Look for all-0's host part (old broadcast addr),
 			 * either for subnet or net.
 			 */
+			// 再看下是否是发到本接口网络号上的
 			t = ntohl(ip->ip_dst.s_addr);
 			if (t == ia->ia_subnet)
 				goto ours;
@@ -269,6 +301,7 @@ next:
 				goto ours;
 		}
 	}
+	// 不是本host的, 检查是否是多播
 	if (IN_MULTICAST(ntohl(ip->ip_dst.s_addr))) {
 		struct in_multi *inm;
 #ifdef MROUTING
@@ -325,6 +358,7 @@ next:
 	/*
 	 * Not for us; forward if possible and desirable.
 	 */
+	// todo: forward
 	if (ipforwarding == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
@@ -332,6 +366,8 @@ next:
 		ip_forward(m, 0);
 	goto next;
 
+	// todo: input
+	// 这是发给本host的
 ours:
 	/*
 	 * If offset or IP_MF are set, must reassemble.
@@ -340,9 +376,9 @@ ours:
 	 * if the packet was previously fragmented,
 	 * but it's not worth the time; just let them time out.)
 	 */
-	if (ip->ip_off &~ IP_DF) {
+	if (ip->ip_off &~ IP_DF) { // ip是分片的
 		if (m->m_flags & M_EXT) {		/* XXX */
-			if ((m = m_pullup(m, sizeof (struct ip))) == 0) {
+			if ((m = m_pullup(m, sizeof (struct ip))) == 0) { // 将整个ip header pullup到mbuf内部
 				ipstat.ips_toosmall++;
 				goto next;
 			}
@@ -352,6 +388,7 @@ ours:
 		 * Look for queue of fragments
 		 * of this datagram.
 		 */
+		// 到ipintrq中找到所有的同id分片
 		for (fp = ipq.next; fp != &ipq; fp = fp->next)
 			if (ip->ip_id == fp->ipq_id &&
 			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
@@ -361,6 +398,7 @@ ours:
 		fp = 0;
 found:
 
+		// 找到了同id分片
 		/*
 		 * Adjust ip_len to not reflect header,
 		 * set ip_mff if more fragments are expected,
@@ -388,11 +426,14 @@ found:
 			if (fp)
 				ip_freef(fp);
 	} else
+		// 不分片的
 		ip->ip_len -= hlen;
 
 	/*
 	 * Switch out to protocol's input routine.
 	 */
+	// 递交给上层协议例程，例如tcp
+	// inetsw
 	ipstat.ips_delivered++;
 	(*inetsw[ip_protox[ip->ip_p]].pr_input)(m, hlen);
 	goto next;
@@ -1026,10 +1067,11 @@ ip_forward(m, srcrt)
 	}
 	ip->ip_ttl -= IPTTLDEC;
 
+  // todo: 定位下一跳 ???
 	sin = (struct sockaddr_in *)&ipforward_rt.ro_dst;
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
 	    ip->ip_dst.s_addr != sin->sin_addr.s_addr) {
-		if (ipforward_rt.ro_rt) {
+		if (ipforward_rt.ro_rt) { // 删除旧的路由缓存
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
 		}
@@ -1063,6 +1105,8 @@ ip_forward(m, srcrt)
 	 * Also, don't send redirect if forwarding using a default route
 	 * or a route modified by a redirect.
 	 */
+	// icmp 发回路由重定向
+	// todo: 是否需要发送重定,向判断依据
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
 	if (rt->rt_ifp == m->m_pkthdr.rcvif &&
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
@@ -1072,8 +1116,8 @@ ip_forward(m, srcrt)
 		u_long src = ntohl(ip->ip_src.s_addr);
 
 		if (RTA(rt) &&
-		    (src & RTA(rt)->ia_subnetmask) == RTA(rt)->ia_subnet) {
-		    if (rt->rt_flags & RTF_GATEWAY)
+		    (src & RTA(rt)->ia_subnetmask) == RTA(rt)->ia_subnet) { // 源目地址的子网络号相同
+		    if (rt->rt_flags & RTF_GATEWAY) // todo: 选择合适的路由器
 			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else
 			dest = ip->ip_dst.s_addr;
@@ -1087,6 +1131,7 @@ ip_forward(m, srcrt)
 		}
 	}
 
+	// todo: 转发分组
 	error = ip_output(m, (struct mbuf *)0, &ipforward_rt, IP_FORWARDING
 #ifdef DIRECTED_BROADCAST
 			    | IP_ALLOWBROADCAST
@@ -1104,6 +1149,8 @@ ip_forward(m, srcrt)
 			return;
 		}
 	}
+
+	// todo: 转发失败而发送icmp报文?
 	if (mcopy == NULL)
 		return;
 	destifp = NULL;

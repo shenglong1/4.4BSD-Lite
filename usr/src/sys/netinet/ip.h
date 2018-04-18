@@ -37,6 +37,8 @@
  * Definitions for internet protocol version 4.
  * Per RFC 791, September 1981.
  */
+#include "../../../../sys/sys/types.h"
+
 #define	IPVERSION	4
 
 /*
@@ -46,6 +48,8 @@
  * pragmatically since otherwise unsigned comparisons can result
  * against negative integers quite easily, and fail in subtle ways.
  */
+// 整个ip分组的协议格式
+// 后面的数字代表 bit 长度
 struct ip {
 #if BYTE_ORDER == LITTLE_ENDIAN 
 	u_char	ip_hl:4,		/* header length */

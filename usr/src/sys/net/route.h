@@ -45,6 +45,7 @@
  * to a routing entry.  These are often held by protocols
  * in their control blocks, e.g. inpcb.
  */
+// 路由表
 struct route {
 	struct	rtentry *ro_rt;
 	struct	sockaddr ro_dst;
@@ -85,7 +86,10 @@ struct rt_metrics {
  */
 #ifndef RNF_NORMAL
 #include <net/radix.h>
+#include "../../../../sys/sys/types.h"
+
 #endif
+// 路由表表项
 struct rtentry {
 	struct	radix_node rt_nodes[2];	/* tree glue, and other values */
 #define	rt_key(r)	((struct sockaddr *)((r)->rt_nodes->rn_key))
