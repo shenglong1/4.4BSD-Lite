@@ -46,8 +46,9 @@
  * in their control blocks, e.g. inpcb.
  */
 // 路由表
+// 缓存：去往dst的路由规则在ro_rt中
 struct route {
-	struct	rtentry *ro_rt;
+	struct	rtentry *ro_rt; // 一条路由规则
 	struct	sockaddr ro_dst;
 };
 

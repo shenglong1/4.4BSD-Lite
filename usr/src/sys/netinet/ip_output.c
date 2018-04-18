@@ -50,6 +50,8 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include "../../../../sys/hp300/include/endian.h"
+#include "in.h"
 
 #ifdef vax
 #include <machine/mtpr.h>
@@ -87,6 +89,7 @@ ip_output(m0, opt, ro, flags, imo)
 		panic("ip_output no HDR");
 #endif
 	if (opt) {
+		// 插入选项到mbuf.data.ip部分
 		m = ip_insertoptions(m, opt, &len);
 		hlen = len;
 	}
@@ -94,6 +97,8 @@ ip_output(m0, opt, ro, flags, imo)
 	/*
 	 * Fill in IP header.
 	 */
+	// forward和rawoutput 都已经有预设header
+	// todo: 设置默认header
 	if ((flags & (IP_FORWARDING|IP_RAWOUTPUT)) == 0) {
 		ip->ip_v = IPVERSION;
 		ip->ip_off &= IP_DF;
@@ -106,6 +111,8 @@ ip_output(m0, opt, ro, flags, imo)
 	/*
 	 * Route packet.
 	 */
+	// todo: 路由选择
+  // 外部没有给定路由规则，用临时变量来获得路由
 	if (ro == 0) {
 		ro = &iproute;
 		bzero((caddr_t)ro, sizeof (*ro));
@@ -117,7 +124,7 @@ ip_output(m0, opt, ro, flags, imo)
 	 * and is still up.  If not, free it and try again.
 	 */
 	if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
-	   dst->sin_addr.s_addr != ip->ip_dst.s_addr)) {
+	   dst->sin_addr.s_addr != ip->ip_dst.s_addr)) { // 路由规则DOWN或者不对
 		RTFREE(ro->ro_rt);
 		ro->ro_rt = (struct rtentry *)0;
 	}
@@ -133,6 +140,7 @@ ip_output(m0, opt, ro, flags, imo)
 #define ifatoia(ifa)	((struct in_ifaddr *)(ifa))
 #define sintosa(sin)	((struct sockaddr *)(sin))
 	if (flags & IP_ROUTETOIF) {
+    // 不允许路由，找外出ifnet
 		if ((ia = ifatoia(ifa_ifwithdstaddr(sintosa(dst)))) == 0 &&
 		    (ia = ifatoia(ifa_ifwithnet(sintosa(dst)))) == 0) {
 			ipstat.ips_noroute++;
@@ -142,6 +150,7 @@ ip_output(m0, opt, ro, flags, imo)
 		ifp = ia->ia_ifp;
 		ip->ip_ttl = 1;
 	} else {
+		// 正常找路由
 		if (ro->ro_rt == 0)
 			rtalloc(ro);
 		if (ro->ro_rt == 0) {
@@ -154,7 +163,9 @@ ip_output(m0, opt, ro, flags, imo)
 		ro->ro_rt->rt_use++;
 		if (ro->ro_rt->rt_flags & RTF_GATEWAY)
 			dst = (struct sockaddr_in *)ro->ro_rt->rt_gateway;
-	}
+	} // 路由选择结束
+
+	// todo: 多播，设置ip分组
 	if (IN_MULTICAST(ntohl(ip->ip_dst.s_addr))) {
 		struct in_multi *inm;
 		extern struct ifnet loif;
@@ -250,6 +261,7 @@ ip_output(m0, opt, ro, flags, imo)
 	 * If source address not specified yet, use address
 	 * of outgoing interface.
 	 */
+	// 保证ip数据报中首部ip.src是个有效地址
 	if (ip->ip_src.s_addr == INADDR_ANY)
 		ip->ip_src = IA_SIN(ia)->sin_addr;
 #endif
@@ -258,6 +270,7 @@ ip_output(m0, opt, ro, flags, imo)
 	 * and verify user is allowed to send
 	 * such a packet.
 	 */
+  // todo: 广播check, ip分组和ifnet 对广播的flag检查
 	if (in_broadcast(dst->sin_addr, ifp)) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
 			error = EADDRNOTAVAIL;
@@ -272,38 +285,41 @@ ip_output(m0, opt, ro, flags, imo)
 			error = EMSGSIZE;
 			goto bad;
 		}
-		m->m_flags |= M_BCAST;
+		m->m_flags |= M_BCAST; // A + B
 	} else
-		m->m_flags &= ~M_BCAST;
+		m->m_flags &= ~M_BCAST; // A - B
 
 sendit:
 	/*
 	 * If small enough for interface, can just send directly.
 	 */
-	if ((u_short)ip->ip_len <= ifp->if_mtu) {
+  // todo: 处理分片!!!!
+	if ((u_short)ip->ip_len <= ifp->if_mtu) { // 不用分片，直接发
 		ip->ip_len = htons((u_short)ip->ip_len);
 		ip->ip_off = htons((u_short)ip->ip_off);
 		ip->ip_sum = 0;
 		ip->ip_sum = in_cksum(m, hlen);
 		error = (*ifp->if_output)(ifp, m,
-				(struct sockaddr *)dst, ro->ro_rt);
+				(struct sockaddr *)dst, ro->ro_rt); // 接口层通用output 方法
 		goto done;
 	}
 	/*
 	 * Too large for interface; fragment if possible.
 	 * Must be able to put at least 8 bytes per fragment.
 	 */
+	// todo: 要分片的
 	if (ip->ip_off & IP_DF) {
 		error = EMSGSIZE;
 		ipstat.ips_cantfrag++;
 		goto bad;
 	}
-	len = (ifp->if_mtu - hlen) &~ 7;
+	len = (ifp->if_mtu - hlen) &~ 7; // 求mtu - hlen 后有多少8字节
 	if (len < 8) {
 		error = EMSGSIZE;
 		goto bad;
 	}
 
+	// todo: 真正的分片算法在这里
     {
 	int mhlen, firstlen = len;
 	struct mbuf **mnext = &m->m_nextpkt;
@@ -365,7 +381,7 @@ sendit:
 	ip->ip_sum = 0;
 	ip->ip_sum = in_cksum(m, hlen);
 sendorfree:
-	for (m = m0; m; m = m0) {
+	for (m = m0; m; m = m0) { // 发送所有分片
 		m0 = m->m_nextpkt;
 		m->m_nextpkt = 0;
 		if (error == 0)
@@ -474,12 +490,13 @@ ip_optcopy(ip, jp)
 /*
  * IP socket option processing.
  */
+// setsockopt/getsockopt 由这里实现
 int
 ip_ctloutput(op, so, level, optname, mp)
-	int op;
+	int op; // set/get
 	struct socket *so;
 	int level, optname;
-	struct mbuf **mp;
+	struct mbuf **mp; // 选项也是由mbuf承载
 {
 	register struct inpcb *inp = sotoinpcb(so);
 	register struct mbuf *m = *mp;
@@ -526,6 +543,7 @@ ip_ctloutput(op, so, level, optname, mp)
 	else \
 		inp->inp_flags &= ~bit;
 
+						// flag增删
 				case IP_RECVOPTS:
 					OPTSET(INP_RECVOPTS);
 					break;

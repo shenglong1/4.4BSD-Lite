@@ -1055,6 +1055,7 @@ ip_forward(m, srcrt)
 		printf("forward: src %x dst %x ttl %x\n", ip->ip_src,
 			ip->ip_dst, ip->ip_ttl);
 #endif
+  // todo: 1.检查该分组是否能forward
 	if (m->m_flags & M_BCAST || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
@@ -1067,30 +1068,34 @@ ip_forward(m, srcrt)
 	}
 	ip->ip_ttl -= IPTTLDEC;
 
-  // todo: 定位下一跳 ???
+  // todo: 2.找路由规则, ipforward_rt cache 或 rtalloc
 	sin = (struct sockaddr_in *)&ipforward_rt.ro_dst;
 	if ((rt = ipforward_rt.ro_rt) == 0 ||
-	    ip->ip_dst.s_addr != sin->sin_addr.s_addr) {
+	    ip->ip_dst.s_addr != sin->sin_addr.s_addr) { // 没有路由缓存，或者缓存没命中
 		if (ipforward_rt.ro_rt) { // 删除旧的路由缓存
 			RTFREE(ipforward_rt.ro_rt);
 			ipforward_rt.ro_rt = 0;
 		}
+    // 到这里ipforward_rt.ro_rt必定为0
+		// 重新分配ro_rt, ro_dst
 		sin->sin_family = AF_INET;
 		sin->sin_len = sizeof(*sin);
 		sin->sin_addr = ip->ip_dst;
 
-		rtalloc(&ipforward_rt);
+		// 这里理解ipforward_rt包含目标ro_dst信息去找ro_dst的路由规则
+		rtalloc(&ipforward_rt); // 重新获取路由
 		if (ipforward_rt.ro_rt == 0) {
 			icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_HOST, dest, 0);
 			return;
 		}
 		rt = ipforward_rt.ro_rt;
-	}
+	} // 到这里，我们有了路由规则，ipforward_rt
 
 	/*
 	 * Save at most 64 bytes of the packet in case
 	 * we need to generate an ICMP message to the src.
 	 */
+	// todo: 预存一份ip数据给将来可能的icmp用
 	mcopy = m_copy(m, 0, imin((int)ip->ip_len, 64));
 
 #ifdef GATEWAY
@@ -1106,21 +1111,22 @@ ip_forward(m, srcrt)
 	 * or a route modified by a redirect.
 	 */
 	// icmp 发回路由重定向
-	// todo: 是否需要发送重定,向判断依据
+	// todo: 判断是否需要发送重定向, 判断依据
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
 	if (rt->rt_ifp == m->m_pkthdr.rcvif &&
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
 	    satosin(rt_key(rt))->sin_addr.s_addr != 0 &&
 	    ipsendredirects && !srcrt) {
+		// 发送重定向
 #define	RTA(rt)	((struct in_ifaddr *)(rt->rt_ifa))
 		u_long src = ntohl(ip->ip_src.s_addr);
 
-		if (RTA(rt) &&
-		    (src & RTA(rt)->ia_subnetmask) == RTA(rt)->ia_subnet) { // 源目地址的子网络号相同
-		    if (rt->rt_flags & RTF_GATEWAY) // todo: 选择合适的路由器
-			dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
+		if (RTA(rt) && (src & RTA(rt)->ia_subnetmask) == RTA(rt)->ia_subnet) { // 源目地址的子网络号相同
+			// 需要重定向
+		    if (rt->rt_flags & RTF_GATEWAY) // todo: 下跳是间接地址
+					dest = satosin(rt->rt_gateway)->sin_addr.s_addr;
 		    else
-			dest = ip->ip_dst.s_addr;
+					dest = ip->ip_dst.s_addr;
 		    /* Router requirements says to only send host redirects */
 		    type = ICMP_REDIRECT;
 		    code = ICMP_REDIRECT_HOST;
@@ -1131,7 +1137,7 @@ ip_forward(m, srcrt)
 		}
 	}
 
-	// todo: 转发分组
+	// todo: 3.转发分组, mbuf + ipforward_rt路由规则
 	error = ip_output(m, (struct mbuf *)0, &ipforward_rt, IP_FORWARDING
 #ifdef DIRECTED_BROADCAST
 			    | IP_ALLOWBROADCAST
@@ -1142,19 +1148,23 @@ ip_forward(m, srcrt)
 	else {
 		ipstat.ips_forward++;
 		if (type)
-			ipstat.ips_redirectsent++;
+			ipstat.ips_redirectsent++; // 需要重定向
 		else {
+			// 发送成功，且不需要重定向
 			if (mcopy)
 				m_freem(mcopy);
 			return;
 		}
 	}
 
-	// todo: 转发失败而发送icmp报文?
+  // 发送失败，或者发送成功且需要重定向
+  // 有错误，但没保存mcopy，无法发送icmp
 	if (mcopy == NULL)
 		return;
 	destifp = NULL;
 
+  // todo: 4.处理发送失败, redirect
+	// forwarding错误优先于redirect来发送icmp
 	switch (error) {
 
 	case 0:				/* forwarded, but need redirect */
@@ -1183,6 +1193,7 @@ ip_forward(m, srcrt)
 		code = 0;
 		break;
 	}
+	// todo: 处理重定向或发送失败的icmp
 	icmp_error(mcopy, type, code, dest, destifp);
 }
 

@@ -68,6 +68,8 @@ struct protosw {
 		void	(*pr_input)();		/* input to protocol (from below) */
 		int	(*pr_output)();		/* output to protocol (from above) */
 		void	(*pr_ctlinput)();	/* control input (from below) */
+
+		// call by setsockopt()
 		int	(*pr_ctloutput)();	/* control output (from above) */
 /* user-protocol hook */
 		int	(*pr_usrreq)();		/* user request: see list below */
