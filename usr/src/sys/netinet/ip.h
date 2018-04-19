@@ -48,7 +48,7 @@
  * pragmatically since otherwise unsigned comparisons can result
  * against negative integers quite easily, and fail in subtle ways.
  */
-// 整个ip分组的协议格式
+// 整个ip分组的协议格式, 不包含option
 // 后面的数字代表 bit 长度
 struct ip {
 #if BYTE_ORDER == LITTLE_ENDIAN 

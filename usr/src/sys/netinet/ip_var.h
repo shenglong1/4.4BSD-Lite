@@ -33,6 +33,9 @@
  *	@(#)ip_var.h	8.1 (Berkeley) 6/10/93
  */
 
+#include "../../../../sys/sys/types.h"
+#include "../../../../sys/netinet/in.h"
+
 /*
  * Overlay for ip header used by other protocols (tcp, udp).
  */
@@ -95,7 +98,8 @@ struct	ipasfrag {
  * is in m_len.
  */
 #define MAX_IPOPTLEN	40
-
+// ip协议格式中选项，一种选项
+// ipopt_list保存 type/len/off/data
 struct ipoption {
 	struct	in_addr ipopt_dst;	/* first-hop dst if source routed */
 	char	ipopt_list[MAX_IPOPTLEN];	/* options proper */

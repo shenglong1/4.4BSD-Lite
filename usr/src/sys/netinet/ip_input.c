@@ -71,6 +71,7 @@
 #include "../../../../sys/news3400/include/endian.h"
 #include "../../../../sys/pmax/include/endian.h"
 #include "../../../../sys/sparc/include/endian.h"
+#include "../../include/string.h"
 
 #ifndef	IPFORWARDING
 #ifdef GATEWAY
@@ -262,7 +263,7 @@ next:
 	 */
 	// todo: 有选项，处理选项
 	ip_nhops = 0;		/* for source routed packets */
-	if (hlen > sizeof (struct ip) && ip_dooptions(m))
+	if (hlen > sizeof (struct ip) && ip_dooptions(m)) // 有选项且dooptions转发了分组，直接处理下一个分组
 		goto next;
 
 	/*
@@ -678,6 +679,7 @@ ip_drain()
  * Returns 1 if packet has been forwarded/freed,
  * 0 if the packet should be processed further.
  */
+// todo: 当前节点从ipintrq队列读到一个ip分组，其中有路有选项的，就添加本节点信息到ip.header.opt
 int
 ip_dooptions(m)
 	struct mbuf *m;
@@ -691,13 +693,15 @@ ip_dooptions(m)
 	n_time ntime;
 
 	dst = ip->ip_dst;
+	// struct ip不包含选项，所以可以计算出选项起始位置和len
 	cp = (u_char *)(ip + 1);
 	cnt = (ip->ip_hl << 2) - sizeof (struct ip);
 	for (; cnt > 0; cnt -= optlen, cp += optlen) {
+		// 遍历每个选项
 		opt = cp[IPOPT_OPTVAL];
-		if (opt == IPOPT_EOL)
+		if (opt == IPOPT_EOL) // 单字节选项
 			break;
-		if (opt == IPOPT_NOP)
+		if (opt == IPOPT_NOP) // 单字节选项
 			optlen = 1;
 		else {
 			optlen = cp[IPOPT_OLEN];
@@ -722,6 +726,7 @@ ip_dooptions(m)
 		 */
 		case IPOPT_LSRR:
 		case IPOPT_SSRR:
+      // 源路由和路由记录，需要forward
 			if ((off = cp[IPOPT_OFFSET]) < IPOPT_MINOFF) {
 				code = &cp[IPOPT_OFFSET] - (u_char *)ip;
 				goto bad;
@@ -776,8 +781,9 @@ ip_dooptions(m)
 			forward = !IN_MULTICAST(ntohl(ip->ip_dst.s_addr));
 			break;
 
-		case IPOPT_RR:
+		case IPOPT_RR: // 记录路由选项, 最多9个ip地址记录, 目标是记录一个本地ip 到ip.opt中
 			if ((off = cp[IPOPT_OFFSET]) < IPOPT_MINOFF) {
+				// off 过小
 				code = &cp[IPOPT_OFFSET] - (u_char *)ip;
 				goto bad;
 			}
@@ -785,14 +791,16 @@ ip_dooptions(m)
 			 * If no space remains, ignore.
 			 */
 			off--;			/* 0 origin */
-			if (off > optlen - sizeof(struct in_addr))
+			if (off > optlen - sizeof(struct in_addr)) // 预留空间不足
 				break;
+        // todo: 开始记录地址到ip分组中选项部分
 			bcopy((caddr_t)(&ip->ip_dst), (caddr_t)&ipaddr.sin_addr,
 			    sizeof(ipaddr.sin_addr));
 			/*
 			 * locate outgoing interface; if we're the destination,
 			 * use the incoming interface (should be same).
 			 */
+        // 找到ip分组到达本节点的进入接口地址和外出接口地址
 			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr)) == 0 &&
 			    (ia = ip_rtaddr(ipaddr.sin_addr)) == 0) {
 				type = ICMP_UNREACH;
@@ -878,6 +886,7 @@ ip_rtaddr(dst)
 
 	sin = (struct sockaddr_in *) &ipforward_rt.ro_dst;
 
+	// 没命中cache的 路由规则，就直接去rtalloc查路由表吧
 	if (ipforward_rt.ro_rt == 0 || dst.s_addr != sin->sin_addr.s_addr) {
 		if (ipforward_rt.ro_rt) {
 			RTFREE(ipforward_rt.ro_rt);
@@ -891,7 +900,7 @@ ip_rtaddr(dst)
 	}
 	if (ipforward_rt.ro_rt == 0)
 		return ((struct in_ifaddr *)0);
-	return ((struct in_ifaddr *) ipforward_rt.ro_rt->rt_ifa);
+	return ((struct in_ifaddr *) ipforward_rt.ro_rt->rt_ifa); // 返回下跳地址
 }
 
 /*
@@ -965,7 +974,7 @@ ip_srcroute()
 	    sizeof(struct in_addr) + OPTSIZ);
 #undef OPTSIZ
 	/*
-	 * Record return path as an IP source route,
+r * Record return path as an IP source route,
 	 * reversing the path (pointers are now aligned).
 	 */
 	while (p >= ip_srcrt.route) {

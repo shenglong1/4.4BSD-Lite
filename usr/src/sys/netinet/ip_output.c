@@ -67,6 +67,7 @@ static void ip_mloopback
  * The mbuf chain containing the packet will be freed.
  * The mbuf opt, if present, will not be freed.
  */
+// 加上ip首部，路由选择，分片，递交给ifnet.if_output
 int
 ip_output(m0, opt, ro, flags, imo)
 	struct mbuf *m0;
@@ -408,6 +409,8 @@ bad:
  * Adjust IP destination as required for IP source routing,
  * as indicated by a non-zero in_addr at the start of the options.
  */
+// todo: merge mbuf(包含ip首部)和mbuf(包含ipoption)
+// copy opt.data.ipoption to m.data, 可能触发新建mbuf节点
 static struct mbuf *
 ip_insertoptions(m, opt, phlen)
 	register struct mbuf *m;
@@ -420,28 +423,32 @@ ip_insertoptions(m, opt, phlen)
 	unsigned optlen;
 
 	optlen = opt->m_len - sizeof(p->ipopt_dst);
-	if (optlen + (u_short)ip->ip_len > IP_MAXPACKET)
+	if (optlen + (u_short)ip->ip_len > IP_MAXPACKET) // ip分组+opt > Max
 		return (m);		/* XXX should fail */
-	if (p->ipopt_dst.s_addr)
+	if (p->ipopt_dst.s_addr) // 源路由选项更新ip.dst???
 		ip->ip_dst = p->ipopt_dst;
+
 	if (m->m_flags & M_EXT || m->m_data - optlen < m->m_pktdat) {
-		MGETHDR(n, M_DONTWAIT, MT_HEADER);
+		// EXT存储，或者mbuf data空间不够
+		MGETHDR(n, M_DONTWAIT, MT_HEADER); // create mbuf n
 		if (n == 0)
 			return (m);
 		n->m_pkthdr.len = m->m_pkthdr.len + optlen;
-		m->m_len -= sizeof(struct ip);
+		m->m_len -= sizeof(struct ip); // 源节点truncate掉ip头
 		m->m_data += sizeof(struct ip);
 		n->m_next = m;
 		m = n;
-		m->m_len = optlen + sizeof(struct ip);
+		m->m_len = optlen + sizeof(struct ip); // 新节点中放ip+opt
 		m->m_data += max_linkhdr;
-		bcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip));
+		bcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip)); // copy ip
 	} else {
+    // 直接在本mbuf上插入opt
 		m->m_data -= optlen;
 		m->m_len += optlen;
 		m->m_pkthdr.len += optlen;
-		ovbcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip));
+		ovbcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip)); // copy ip
 	}
+	// copy opt
 	ip = mtod(m, struct ip *);
 	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), (unsigned)optlen);
 	*phlen = sizeof(struct ip) + optlen;
@@ -650,6 +657,7 @@ int
 ip_pcbopts(optname, pcbopt, m)
 	int optname;
 #else
+// mbuf.
 ip_pcbopts(pcbopt, m)
 #endif
 	struct mbuf **pcbopt;
@@ -686,10 +694,11 @@ ip_pcbopts(pcbopt, m)
 	cnt = m->m_len;
 	m->m_len += sizeof(struct in_addr);
 	cp = mtod(m, u_char *) + sizeof(struct in_addr);
-	ovbcopy(mtod(m, caddr_t), (caddr_t)cp, (unsigned)cnt);
+	ovbcopy(mtod(m, caddr_t), (caddr_t)cp, (unsigned)cnt); // m.data整体往后挪，留出in_addr空间
 	bzero(mtod(m, caddr_t), sizeof(struct in_addr));
 
 	for (; cnt > 0; cnt -= optlen, cp += optlen) {
+		// 遍历mbuf.data每个opt
 		opt = cp[IPOPT_OPTVAL];
 		if (opt == IPOPT_EOL)
 			break;

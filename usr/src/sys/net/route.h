@@ -99,8 +99,11 @@ struct rtentry {
 	short	rt_flags;		/* up/down?, host/net */
 	short	rt_refcnt;		/* # held references */
 	u_long	rt_use;			/* raw # packets forwarded */
+
+	// 这俩就是查路由表的结果，下跳地址
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface to use */
+
 	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
 	caddr_t	rt_llinfo;		/* pointer to link level info cache */
 	struct	rt_metrics rt_rmx;	/* metrics used by rx'ing protocols */
