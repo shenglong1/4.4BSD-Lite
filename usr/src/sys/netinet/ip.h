@@ -62,10 +62,13 @@ struct ip {
 	u_char	ip_tos;			/* type of service */
 	short	ip_len;			/* total length */
 	u_short	ip_id;			/* identification */
+
+	// ip_off中包含DF/MF/OFFSET信息，使用下面三个mask获得
 	short	ip_off;			/* fragment offset field */
 #define	IP_DF 0x4000			/* dont fragment flag */
 #define	IP_MF 0x2000			/* more fragments flag */
 #define	IP_OFFMASK 0x1fff		/* mask for fragmenting bits */
+
 	u_char	ip_ttl;			/* time to live */
 	u_char	ip_p;			/* protocol */
 	u_short	ip_sum;			/* checksum */

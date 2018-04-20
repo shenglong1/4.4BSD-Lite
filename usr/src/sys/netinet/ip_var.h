@@ -54,6 +54,8 @@ struct ipovly {
  * They are timed out after ipq_ttl drops to 0, and may also
  * be reclaimed if memory becomes tight.
  */
+// 每个ipq有多个ipasfrag
+// ipq对应ip分组，ipasfrag对应一个分片
 struct ipq {
 	struct	ipq *next,*prev;	/* to other reass headers */
 	u_char	ipq_ttl;		/* time for reass q to live */

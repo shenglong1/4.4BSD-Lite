@@ -50,8 +50,14 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <linux/types.h>
+#include <mem.h>
 #include "../../../../sys/hp300/include/endian.h"
 #include "in.h"
+#include "../../../../sys/sys/mbuf.h"
+#include "../../contrib/nvi.1.14/mem.h"
+#include "../../contrib/nvi.1.14/msg.h"
+#include "../../../../sys/sys/malloc.h"
 
 #ifdef vax
 #include <machine/mtpr.h>
@@ -314,8 +320,10 @@ sendit:
 		ipstat.ips_cantfrag++;
 		goto bad;
 	}
-	len = (ifp->if_mtu - hlen) &~ 7; // 求mtu - hlen 后有多少8字节
-	if (len < 8) {
+	// todo: 根据MTU计算每个分组分片后的大小
+  // 这里计算MTU.data每个分组,即ip.data大小 8字节对齐
+	len = (ifp->if_mtu - hlen) &~ 7;
+	if (len < 8) { // 从这看出，分片的最小数据长度是8字节
 		error = EMSGSIZE;
 		goto bad;
 	}
@@ -332,6 +340,8 @@ sendit:
 	m0 = m;
 	mhlen = sizeof (struct ip);
 	for (off = hlen + len; off < (u_short)ip->ip_len; off += len) {
+		// 在原ip.data中每次取出len长数据，做ip.header+len长data
+		// todo: copy ip header to new mbuf header node
 		MGETHDR(m, M_DONTWAIT, MT_HEADER);
 		if (m == 0) {
 			error = ENOBUFS;
@@ -340,20 +350,23 @@ sendit:
 		}
 		m->m_data += max_linkhdr;
 		mhip = mtod(m, struct ip *);
-		*mhip = *ip;
+		*mhip = *ip; // copy struct ip
 		if (hlen > sizeof (struct ip)) {
 			mhlen = ip_optcopy(ip, mhip) + sizeof (struct ip);
 			mhip->ip_hl = mhlen >> 2;
 		}
 		m->m_len = mhlen;
+		// todo: 这里要处理：此ip分组是已分组的!!!
 		mhip->ip_off = ((off - hlen) >> 3) + (ip->ip_off & ~IP_MF);
 		if (ip->ip_off & IP_MF)
 			mhip->ip_off |= IP_MF;
 		if (off + len >= (u_short)ip->ip_len)
-			len = (u_short)ip->ip_len - off;
+			len = (u_short)ip->ip_len - off; // 最后一个分片设置MF=0
 		else
 			mhip->ip_off |= IP_MF;
 		mhip->ip_len = htons((u_short)(len + mhlen));
+
+		// todo: copy fragment data to new mbuf data node
 		m->m_next = m_copy(m0, off, len);
 		if (m->m_next == 0) {
 			(void) m_free(m);
@@ -375,7 +388,7 @@ sendit:
 	 * and updating header, then send each fragment (in order).
 	 */
 	m = m0;
-	m_adj(m, hlen + firstlen - (u_short)ip->ip_len);
+	m_adj(m, hlen + firstlen - (u_short)ip->ip_len); // 截断原始分组，使成为分片第一片
 	m->m_pkthdr.len = hlen + firstlen;
 	ip->ip_len = htons((u_short)m->m_pkthdr.len);
 	ip->ip_off = htons((u_short)(ip->ip_off | IP_MF));
@@ -484,11 +497,14 @@ ip_optcopy(ip, jp)
 		/* bogus lengths should have been caught by ip_dooptions */
 		if (optlen > cnt)
 			optlen = cnt;
-		if (IPOPT_COPIED(opt)) {
+		if (IPOPT_COPIED(opt)) { // todo: opt中标记为copied=1的才复制到每一个ip分组中
 			bcopy((caddr_t)cp, (caddr_t)dp, (unsigned)optlen);
 			dp += optlen;
 		}
 	}
+	// todo: 这里实现dp末尾选项填充，保证optlen4字节对齐
+	// optlen单位是字节
+	// 这里实现一个round_up操作
 	for (optlen = dp - (u_char *)(jp+1); optlen & 0x3; optlen++)
 		*dp++ = IPOPT_EOL;
 	return (optlen);

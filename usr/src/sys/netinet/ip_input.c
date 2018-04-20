@@ -377,7 +377,7 @@ ours:
 	 * if the packet was previously fragmented,
 	 * but it's not worth the time; just let them time out.)
 	 */
-	if (ip->ip_off &~ IP_DF) { // ip是分片的
+	if (ip->ip_off &~ IP_DF) { // ip是分片的, 有MF>0，有off
 		if (m->m_flags & M_EXT) {		/* XXX */
 			if ((m = m_pullup(m, sizeof (struct ip))) == 0) { // 将整个ip header pullup到mbuf内部
 				ipstat.ips_toosmall++;
@@ -389,7 +389,7 @@ ours:
 		 * Look for queue of fragments
 		 * of this datagram.
 		 */
-		// 到ipintrq中找到所有的同id分片
+		// 找到ipq链表中的同id ipq
 		for (fp = ipq.next; fp != &ipq; fp = fp->next)
 			if (ip->ip_id == fp->ipq_id &&
 			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
@@ -405,6 +405,7 @@ found:
 		 * set ip_mff if more fragments are expected,
 		 * convert offset of this to bytes.
 		 */
+		// 将MF标志放到ip.tos低位，将ip.ip_off调整为字节位单位
 		ip->ip_len -= hlen;
 		((struct ipasfrag *)ip)->ipf_mff &= ~1;
 		if (ip->ip_off & IP_MF)
@@ -416,6 +417,7 @@ found:
 		 * or if this is not the first fragment,
 		 * attempt reassembly; if it succeeds, proceed.
 		 */
+		// todo: 根据当前ip分组MF/off情况和 当前ipq情况，决定是ip分组插入ipq，还是丢弃ipq，或开始重组
 		if (((struct ipasfrag *)ip)->ipf_mff & 1 || ip->ip_off) {
 			ipstat.ips_fragments++;
 			ip = ip_reass((struct ipasfrag *)ip, fp);
@@ -430,6 +432,7 @@ found:
 		// 不分片的
 		ip->ip_len -= hlen;
 
+  // 到这里，无论如何给我一个完整的ip mbuf(不再是分片的)
 	/*
 	 * Switch out to protocol's input routine.
 	 */
