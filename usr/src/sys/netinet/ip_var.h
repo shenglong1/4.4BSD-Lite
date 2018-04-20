@@ -63,7 +63,7 @@ struct ipq {
 	u_short	ipq_id;			/* sequence id for reassembly */
 	struct	ipasfrag *ipq_next,*ipq_prev;
 					/* to ip headers of fragments */
-	struct	in_addr ipq_src,ipq_dst;
+	struct	in_addr ipq_src,ipq_dst; // 本ipq对应分组的真实src/dst
 };
 
 /*
@@ -71,6 +71,7 @@ struct ipq {
  *
  * Note: ipf_next must be at same offset as ipq_next above
  */
+// 对应分组中的一个分片，实际也是一个ip分组，即mbuf链
 struct	ipasfrag {
 #if BYTE_ORDER == LITTLE_ENDIAN 
 	u_char	ip_hl:4,

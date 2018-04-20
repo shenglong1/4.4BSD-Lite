@@ -389,7 +389,7 @@ ours:
 		 * Look for queue of fragments
 		 * of this datagram.
 		 */
-		// 找到ipq链表中的同id ipq
+		// 找到ipq链表中的同id ipq, 尝试性的重组
 		for (fp = ipq.next; fp != &ipq; fp = fp->next)
 			if (ip->ip_id == fp->ipq_id &&
 			    ip->ip_src.s_addr == fp->ipq_src.s_addr &&
@@ -420,12 +420,12 @@ found:
 		// todo: 根据当前ip分组MF/off情况和 当前ipq情况，决定是ip分组插入ipq，还是丢弃ipq，或开始重组
 		if (((struct ipasfrag *)ip)->ipf_mff & 1 || ip->ip_off) {
 			ipstat.ips_fragments++;
-			ip = ip_reass((struct ipasfrag *)ip, fp);
+			ip = ip_reass((struct ipasfrag *)ip, fp); // todo: 重组
 			if (ip == 0)
-				goto next;
+				goto next; // 当前ip分片所属的ipq还没有接受完全,不能重组
 			ipstat.ips_reassembled++;
 			m = dtom(ip);
-		} else
+		} else // MF=0 && offset=0
 			if (fp)
 				ip_freef(fp);
 	} else
@@ -452,6 +452,14 @@ bad:
  * reassembly of this datagram already exists, then it
  * is given as fp; otherwise have to make a chain.
  */
+// todo: 重组
+// 1.调整ip首个mbuf，去除ip header
+// 2.(optional)首个分片，新建ipq
+// 3.寻找插入位置q
+// 4.处理新老分组重叠
+// 5.插入ip
+// 6.判断ipq是否分片是否足够
+// 7.重组m_ycat
 struct ip *
 ip_reass(ip, fp)
 	register struct ipasfrag *ip;
@@ -463,16 +471,18 @@ ip_reass(ip, fp)
 	int hlen = ip->ip_hl << 2;
 	int i, next;
 
-	/*
+/*
 	 * Presence of header sizes in mbufs
 	 * would confuse code below.
 	 */
+	// 新来的ip分组的首个mbuf truncate掉ip头部
 	m->m_data += hlen;
 	m->m_len -= hlen;
 
 	/*
 	 * If first fragment to arrive, create a reassembly queue.
 	 */
+  // 新的id 分片到达，建立新的ipq链, 插入到全局ipq中
 	if (fp == 0) {
 		if ((t = m_get(M_DONTWAIT, MT_FTABLE)) == NULL)
 			goto dropfrag;
@@ -491,6 +501,7 @@ ip_reass(ip, fp)
 	/*
 	 * Find a segment which begins after this one does.
 	 */
+	// 找到当前分片在ipq中的下一个分片位置, 之后ip就插入到q前面
 	for (q = fp->ipq_next; q != (struct ipasfrag *)fp; q = q->ipf_next)
 		if (q->ip_off > ip->ip_off)
 			break;
@@ -500,6 +511,7 @@ ip_reass(ip, fp)
 	 * our data already.  If so, drop the data from the incoming
 	 * segment.  If it provides all of our data, drop us.
 	 */
+	// 新分片和老分片重叠，truncate新分片中和老分片重叠的部分
 	if (q->ipf_prev != (struct ipasfrag *)fp) {
 		i = q->ipf_prev->ip_off + q->ipf_prev->ip_len - ip->ip_off;
 		if (i > 0) {
@@ -515,6 +527,7 @@ ip_reass(ip, fp)
 	 * While we overlap succeeding segments trim them or,
 	 * if they are completely covered, dequeue them.
 	 */
+	// 代码truncate或丢弃已有的分片
 	while (q != (struct ipasfrag *)fp && ip->ip_off + ip->ip_len > q->ip_off) {
 		i = (ip->ip_off + ip->ip_len) - q->ip_off;
 		if (i < q->ip_len) {
@@ -533,7 +546,10 @@ insert:
 	 * Stick new segment in its place;
 	 * check for complete reassembly.
 	 */
-	ip_enq(ip, q->ipf_prev);
+	// 当前分片ip插入到ipq中
+  // 扫描一个ipq链，看是否全部分片到达
+	// 还缺少分片就return 0
+	ip_enq(ip, q->ipf_prev); // 当前分组插入到ipq指向的队列尾
 	next = 0;
 	for (q = fp->ipq_next; q != (struct ipasfrag *)fp; q = q->ipf_next) {
 		if (q->ip_off != next)
@@ -564,6 +580,7 @@ insert:
 	 * dequeue and discard fragment reassembly header.
 	 * Make header visible.
 	 */
+	// 建立重组分组的ip首部
 	ip = fp->ipq_next;
 	ip->ip_len = next;
 	ip->ipf_mff &= ~1;
