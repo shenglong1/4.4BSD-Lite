@@ -98,6 +98,7 @@ udp_input(m, iphlen)
 	 * but we don't yet have a way to check the checksum
 	 * with options still present.
 	 */
+  // 丢弃ip header中的opt
 	if (iphlen > sizeof (struct ip)) {
 		ip_stripoptions(m, (struct mbuf *)0);
 		iphlen = sizeof(struct ip);
@@ -106,8 +107,10 @@ udp_input(m, iphlen)
 	/*
 	 * Get IP and UDP header together in first mbuf.
 	 */
+	// 保证第一个mbuf中包含28字节，ip+udp header
 	ip = mtod(m, struct ip *);
 	if (m->m_len < iphlen + sizeof(struct udphdr)) {
+		// 保证ip + udphdr 都在这个mbuf中
 		if ((m = m_pullup(m, iphlen + sizeof(struct udphdr))) == 0) {
 			udpstat.udps_hdrops++;
 			return;
@@ -120,6 +123,7 @@ udp_input(m, iphlen)
 	 * Make mbuf data length reflect UDP length.
 	 * If not enough data to reflect UDP length, drop.
 	 */
+	// ip 和 udp 长度检查
 	len = ntohs((u_short)uh->uh_ulen);
 	if (ip->ip_len != len) {
 		if (len > ip->ip_len) {
@@ -138,7 +142,9 @@ udp_input(m, iphlen)
 	/*
 	 * Checksum extended UDP header and data.
 	 */
+	// 至于udpcksum开启，并且接收的数据报有chksum才校验
 	if (udpcksum && uh->uh_sum) {
+		// ip header还原为伪首部，计算chksum
 		((struct ipovly *)ip)->ih_next = 0;
 		((struct ipovly *)ip)->ih_prev = 0;
 		((struct ipovly *)ip)->ih_x1 = 0;
@@ -150,6 +156,7 @@ udp_input(m, iphlen)
 		}
 	}
 
+	// 多播的，递交给多个pcb.socket
 	if (IN_MULTICAST(ntohl(ip->ip_dst.s_addr)) ||
 	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif)) {
 		struct socket *last;
@@ -242,7 +249,9 @@ udp_input(m, iphlen)
 	/*
 	 * Locate pcb for datagram.
 	 */
+	// 单播，找到完全匹配的pcb
 	inp = udp_last_inpcb;
+	// 优先查找上一次接收数据报的pcb
 	if (inp->inp_lport != uh->uh_dport ||
 	    inp->inp_fport != uh->uh_sport ||
 	    inp->inp_faddr.s_addr != ip->ip_src.s_addr ||
@@ -254,6 +263,7 @@ udp_input(m, iphlen)
 		udpstat.udpps_pcbcachemiss++;
 	}
 	if (inp == 0) {
+		// 找不到目标pcb，回复icmp，但对广播和多播目标地址不回复icmp
 		udpstat.udps_noport++;
 		if (m->m_flags & (M_BCAST | M_MCAST)) {
 			udpstat.udps_noportbcast++;
@@ -271,12 +281,12 @@ udp_input(m, iphlen)
 	 */
 	udp_in.sin_port = uh->uh_sport;
 	udp_in.sin_addr = ip->ip_src;
-	if (inp->inp_flags & INP_CONTROLOPTS) {
+	if (inp->inp_flags & INP_CONTROLOPTS) { // 有控制信息
 		struct mbuf **mp = &opts;
 
-		if (inp->inp_flags & INP_RECVDSTADDR) {
+		if (inp->inp_flags & INP_RECVDSTADDR) { // 处理RECVDSTADDR
 			*mp = udp_saveopt((caddr_t) &ip->ip_dst,
-			    sizeof(struct in_addr), IP_RECVDSTADDR);
+			    sizeof(struct in_addr), IP_RECVDSTADDR); // 新建mbuf，保存opt
 			if (*mp)
 				mp = &(*mp)->m_next;
 		}
@@ -297,6 +307,9 @@ udp_input(m, iphlen)
 		}
 #endif
 	}
+	// 在mbuf中truncate 掉ip+udp header
+	// 递交到socket 层
+	// data，remoteaddr，opt都放到socket接受缓存中
 	iphlen += sizeof(struct udphdr);
 	m->m_len -= iphlen;
 	m->m_pkthdr.len -= iphlen;
@@ -306,7 +319,7 @@ udp_input(m, iphlen)
 		udpstat.udps_fullsock++;
 		goto bad;
 	}
-	sorwakeup(inp->inp_socket);
+	sorwakeup(inp->inp_socket); // notify
 	return;
 bad:
 	m_freem(m);
@@ -318,6 +331,7 @@ bad:
  * Create a "control" mbuf containing the specified data
  * with the specified type for presentation with a datagram.
  */
+// copy p-size to mbuf.data(cmsghdr.data)
 struct mbuf *
 udp_saveopt(p, size, type)
 	caddr_t p;
@@ -353,6 +367,7 @@ udp_notify(inp, errno)
 	sowwakeup(inp->inp_socket);
 }
 
+// 当收到icmp错误时，由pfctlinput调用
 void
 udp_ctlinput(cmd, sa, ip)
 	int cmd;
@@ -374,11 +389,12 @@ udp_ctlinput(cmd, sa, ip)
 		in_pcbnotify(&udb, sa, 0, zeroin_addr, 0, cmd, udp_notify);
 }
 
+// 包括对端地址验证，有connect就不能显示指定，显示指定就不能connect
 int
 udp_output(inp, m, addr, control)
-	register struct inpcb *inp;
-	register struct mbuf *m;
-	struct mbuf *addr, *control;
+	register struct inpcb *inp; // socket pcb
+	register struct mbuf *m; // data
+	struct mbuf *addr, *control; // addr, control
 {
 	register struct udpiphdr *ui;
 	register int len = m->m_pkthdr.len;
@@ -388,9 +404,10 @@ udp_output(inp, m, addr, control)
 	if (control)
 		m_freem(control);		/* XXX */
 
+	// 处理remote addr
 	if (addr) {
 		laddr = inp->inp_laddr;
-		if (inp->inp_faddr.s_addr != INADDR_ANY) {
+		if (inp->inp_faddr.s_addr != INADDR_ANY) { // 指定了sendto地址，且有connect地址
 			error = EISCONN;
 			goto release;
 		}
@@ -398,13 +415,13 @@ udp_output(inp, m, addr, control)
 		 * Must block input while temporarily connected.
 		 */
 		s = splnet();
-		error = in_pcbconnect(inp, addr);
+		error = in_pcbconnect(inp, addr); // 建立临时连接到remote
 		if (error) {
 			splx(s);
 			goto release;
 		}
 	} else {
-		if (inp->inp_faddr.s_addr == INADDR_ANY) {
+		if (inp->inp_faddr.s_addr == INADDR_ANY) { // 没有sendto地址，也没有connect地址
 			error = ENOTCONN;
 			goto release;
 		}
@@ -413,6 +430,7 @@ udp_output(inp, m, addr, control)
 	 * Calculate data length and get a mbuf
 	 * for UDP and IP headers.
 	 */
+	// data前面插入伪首部
 	M_PREPEND(m, sizeof(struct udpiphdr), M_DONTWAIT);
 	if (m == 0) {
 		error = ENOBUFS;
@@ -423,6 +441,7 @@ udp_output(inp, m, addr, control)
 	 * Fill in mbuf with extended UDP header
 	 * and addresses and length put into network format.
 	 */
+	// 仅设置伪首部
 	ui = mtod(m, struct udpiphdr *);
 	ui->ui_next = ui->ui_prev = 0;
 	ui->ui_x1 = 0;
@@ -442,10 +461,13 @@ udp_output(inp, m, addr, control)
 	    if ((ui->ui_sum = in_cksum(m, sizeof (struct udpiphdr) + len)) == 0)
 		ui->ui_sum = 0xffff;
 	}
+
+	// 校验完，设置整个ip header中由udp负责的部分
 	((struct ip *)ui)->ip_len = sizeof (struct udpiphdr) + len;
 	((struct ip *)ui)->ip_ttl = inp->inp_ip.ip_ttl;	/* XXX */
 	((struct ip *)ui)->ip_tos = inp->inp_ip.ip_tos;	/* XXX */
 	udpstat.udps_opackets++;
+	// pcb提供ip选项，socket选项
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    inp->inp_socket->so_options & (SO_DONTROUTE | SO_BROADCAST),
 	    inp->inp_moptions);
@@ -467,6 +489,7 @@ u_long	udp_recvspace = 40 * (1024 + sizeof(struct sockaddr_in));
 					/* 40 1K datagrams */
 
 /*ARGSUSED*/
+// 所有用户请求，read/write/socket/bind/ioctl/getsockname等
 int
 udp_usrreq(so, req, m, addr, control)
 	struct socket *so;
@@ -477,7 +500,8 @@ udp_usrreq(so, req, m, addr, control)
 	int error = 0;
 	int s;
 
-	if (req == PRU_CONTROL)
+	if (req == PRU_CONTROL) // ioctl
+		// in_control读写in_ifaddr
 		return (in_control(so, (int)m, (caddr_t)addr,
 			(struct ifnet *)control));
 	if (inp == NULL && req != PRU_ATTACH) {
@@ -490,7 +514,7 @@ udp_usrreq(so, req, m, addr, control)
 	 */
 	switch (req) {
 
-	case PRU_ATTACH:
+	case PRU_ATTACH: // socket()
 		if (inp != NULL) {
 			error = EINVAL;
 			break;
@@ -506,7 +530,7 @@ udp_usrreq(so, req, m, addr, control)
 		((struct inpcb *) so->so_pcb)->inp_ip.ip_ttl = ip_defttl;
 		break;
 
-	case PRU_DETACH:
+	case PRU_DETACH: // socket close
 		udp_detach(inp);
 		break;
 
@@ -557,18 +581,18 @@ udp_usrreq(so, req, m, addr, control)
 		break;
 
 	case PRU_SEND:
-		return (udp_output(inp, m, addr, control));
+		return (udp_output(inp, m, addr, control)); // todo: 数据输出
 
 	case PRU_ABORT:
 		soisdisconnected(so);
 		udp_detach(inp);
 		break;
 
-	case PRU_SOCKADDR:
+	case PRU_SOCKADDR: // getsockname
 		in_setsockaddr(inp, addr);
 		break;
 
-	case PRU_PEERADDR:
+	case PRU_PEERADDR: // getpeername
 		in_setpeeraddr(inp, addr);
 		break;
 
@@ -619,6 +643,7 @@ udp_detach(inp)
 /*
  * Sysctl for udp variables.
  */
+// 仅支持开启和关闭udp checksum
 udp_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 	int *name;
 	u_int namelen;

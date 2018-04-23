@@ -39,6 +39,8 @@
 /*
  * Overlay for ip header used by other protocols (tcp, udp).
  */
+// udp和tcp的伪首部+next/prev
+// 实际上是完全覆盖了一个ip header
 struct ipovly {
 	caddr_t	ih_next, ih_prev;	/* for protocol sequence q's */
 	u_char	ih_x1;			/* (unused) */

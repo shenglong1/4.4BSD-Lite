@@ -61,7 +61,7 @@ struct protosw {
 		short	pr_type;		/* socket type used for */ // SOCK_STREAM
 		struct	domain *pr_domain;	/* domain protocol a member of */
 		// 协议编号：用在 ip分组协议字段，ip_protox下标
-		short	pr_protocol;		/* protocol number in domain */
+		short	pr_protocol;		/* protocol number in domain */ // IPPROTO_
 		short	pr_flags;		/* see below */
 /* protocol-protocol hooks */
     // 协议入口,协议相关的例程
@@ -69,9 +69,9 @@ struct protosw {
 		int	(*pr_output)();		/* output to protocol (from above) */
 		void	(*pr_ctlinput)();	/* control input (from below) */
 
-		// call by setsockopt()
+		// todo: call by setsockopt()
 		int	(*pr_ctloutput)();	/* control output (from above) */
-/* user-protocol hook */
+/* user-protocol hook */ // todo: for ioctl
 		int	(*pr_usrreq)();		/* user request: see list below */
 /* utility hooks */
 		// 协议其他函数
