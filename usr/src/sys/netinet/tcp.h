@@ -45,7 +45,7 @@ struct tcphdr {
 	tcp_seq	th_ack;			/* acknowledgement number */
 #if BYTE_ORDER == LITTLE_ENDIAN 
 	u_char	th_x2:4,		/* (unused) */
-		th_off:4;		/* data offset */
+		th_off:4;		/* data offset */ // tcp header len
 #endif
 #if BYTE_ORDER == BIG_ENDIAN 
 	u_char	th_off:4,		/* data offset */
@@ -60,7 +60,7 @@ struct tcphdr {
 #define	TH_URG	0x20
 	u_short	th_win;			/* window */
 	u_short	th_sum;			/* checksum */
-	u_short	th_urp;			/* urgent pointer */
+	u_short	th_urp;			/* urgent pointer */ // 相对于seq的偏移量
 };
 
 #define	TCPOPT_EOL		0

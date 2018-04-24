@@ -36,6 +36,7 @@
 /*
  * Tcp+ip header, after ip options removed.
  */
+// 包含整个ipheader和tcpheader，用于建ip伪首部
 struct tcpiphdr {
 	struct 	ipovly ti_i;		/* overlaid ip structure */
 	struct	tcphdr ti_t;		/* tcp header */

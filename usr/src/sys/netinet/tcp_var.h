@@ -69,6 +69,7 @@ struct tcpcb {
  * See RFC783, Dec. 1981, page 21.
  */
 /* send sequence variables */
+  // todo: 发送窗口
 	tcp_seq	snd_una;		/* send unacknowledged */
 	tcp_seq	snd_nxt;		/* send next */
 	tcp_seq	snd_up;			/* send urgent pointer */
@@ -77,6 +78,7 @@ struct tcpcb {
 	tcp_seq	iss;			/* initial send sequence number */
 	u_long	snd_wnd;		/* send window */
 /* receive sequence variables */
+	// todo: 接收窗口
 	u_long	rcv_wnd;		/* receive window */
 	tcp_seq	rcv_nxt;		/* receive next */
 	tcp_seq	rcv_up;			/* receive urgent pointer */
