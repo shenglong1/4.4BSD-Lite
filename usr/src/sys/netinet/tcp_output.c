@@ -580,17 +580,20 @@ out:
 	return (0);
 }
 
+// persist超时时调用
 void
 tcp_setpersist(tp)
 	register struct tcpcb *tp;
 {
 	register t = ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1;
 
-	if (tp->t_timer[TCPT_REXMT])
+	if (tp->t_timer[TCPT_REXMT]) // 超时重传未启用时,才能设置
 		panic("tcp_output REXMT");
 	/*
 	 * Start/restart persistance timer.
 	 */
+	// 重新计算数值，设置persist的t_timer
+	// tp->t_timer[TCPT_PERSIST] = t * tcp_backoff[tp_t_rxtshift]
 	TCPT_RANGESET(tp->t_timer[TCPT_PERSIST],
 	    t * tcp_backoff[tp->t_rxtshift],
 	    TCPTV_PERSMIN, TCPTV_PERSMAX);

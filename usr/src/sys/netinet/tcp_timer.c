@@ -180,7 +180,7 @@ tcp_timers(tp, timer)
 	case TCPT_2MSL:
 		if (tp->t_state != TCPS_TIME_WAIT &&
 		    tp->t_idle <= tcp_maxidle) // FIN_WAIT_2 timeout
-			tp->t_timer[TCPT_2MSL] = tcp_keepintvl; // 继续计时
+			tp->t_timer[TCPT_2MSL] = tcp_keepintvl; // 设置第二段超时75s，继续计时
 		else
 			tp = tcp_close(tp); // TIME_WAIT timeout or FIN_WAIT_2 idle > maxidle
 		break;
@@ -190,7 +190,8 @@ tcp_timers(tp, timer)
 	 * been acked within retransmit interval.  Back off
 	 * to a longer retransmit interval and retransmit one segment.
 	 */
-	case TCPT_REXMT:
+		case TCPT_REXMT:
+		// todo: 超时重传的超时处理
 		if (++tp->t_rxtshift > TCP_MAXRXTSHIFT) {
 			tp->t_rxtshift = TCP_MAXRXTSHIFT;
 			tcpstat.tcps_timeoutdrop++;
@@ -199,6 +200,8 @@ tcp_timers(tp, timer)
 			break;
 		}
 		tcpstat.tcps_rexmttimeo++;
+
+			// 当前重传次数下，RTO的计算, 初始RTO*2exp(N)
 		rexmt = TCP_REXMTVAL(tp) * tcp_backoff[tp->t_rxtshift];
 		TCPT_RANGESET(tp->t_rxtcur, rexmt,
 		    tp->t_rttmin, TCPTV_REXMTMAX);
@@ -211,16 +214,20 @@ tcp_timers(tp, timer)
 		 * move the current srtt into rttvar to keep the current
 		 * retransmit times until then.
 		 */
+			// 重传大于4次，释放路由缓存，让其重新路由
+			// 清除过旧的srtt
 		if (tp->t_rxtshift > TCP_MAXRXTSHIFT / 4) {
 			in_losing(tp->t_inpcb);
 			tp->t_rttvar += (tp->t_srtt >> TCP_RTT_SHIFT);
 			tp->t_srtt = 0;
 		}
-		tp->snd_nxt = tp->snd_una;
+		tp->snd_nxt = tp->snd_una; // 从最早的未确认数据开始重传
 		/*
 		 * If timing a segment in this window, stop the timer.
 		 */
-		tp->t_rtt = 0;
+		tp->t_rtt = 0; // 如果对一个seq正在计算RTT，就停止
+
+			// todo: ack超时看做发生了拥塞，要开始慢启动了
 		/*
 		 * Close the congestion window down to one segment
 		 * (we'll open it by one segment for each ack we get).
@@ -245,15 +252,17 @@ tcp_timers(tp, timer)
 		 * growth is 2 mss.  We don't allow the threshhold
 		 * to go below this.)
 		 */
+      // 计算拥塞窗口 cwnd, th
+			// 慢开始 th = 当前窗口 / 2, cwnd = mss
 		{
-		u_int win = min(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg;
+		u_int win = min(tp->snd_wnd, tp->snd_cwnd) / 2 / tp->t_maxseg; // 计算新th，单位mss
 		if (win < 2)
 			win = 2;
 		tp->snd_cwnd = tp->t_maxseg;
 		tp->snd_ssthresh = win * tp->t_maxseg;
 		tp->t_dupacks = 0;
 		}
-		(void) tcp_output(tp);
+		(void) tcp_output(tp); // 重传
 		break;
 
 	/*
@@ -262,7 +271,7 @@ tcp_timers(tp, timer)
 	 */
 	case TCPT_PERSIST:
 		tcpstat.tcps_persisttimeo++;
-		tcp_setpersist(tp); // rebind?
+		tcp_setpersist(tp); // 根据tcp退让策略，两倍退让设置t_timer超时
 		tp->t_force = 1;
 		(void) tcp_output(tp);
 		tp->t_force = 0;
@@ -273,13 +282,14 @@ tcp_timers(tp, timer)
 	 * or drop connection if idle for too long.
 	 */
 			// connect/keep_alive timeout
-	case TCPT_KEEP:
+		case TCPT_KEEP:
+		// todo: 实现rebind/probe,始终rebind 默认的75s，probe返回才会将t_timer重置为2h
 		tcpstat.tcps_keeptimeo++;
 		if (tp->t_state < TCPS_ESTABLISHED) // connect timeout
 			goto dropit;
 		if (tp->t_inpcb->inp_socket->so_options & SO_KEEPALIVE &&
-		    tp->t_state <= TCPS_CLOSE_WAIT) { // 如果
-		    	if (tp->t_idle >= tcp_keepidle + tcp_maxidle)
+		    tp->t_state <= TCPS_CLOSE_WAIT) {
+		     	if (tp->t_idle >= tcp_keepidle + tcp_maxidle) // 长时间没有数据ack，t_idle已经累计的很大了
 				goto dropit;
 			/*
 			 * Send a packet designed to force a response

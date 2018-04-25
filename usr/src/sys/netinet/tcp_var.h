@@ -48,9 +48,9 @@ struct tcpcb {
 
 	// t_timer[type] = elapse
 	short	t_timer[TCPT_NTIMERS];	/* tcp timers */
-	short	t_rxtshift;		/* log(2) of rexmt exp. backoff */
+	short	t_rxtshift;		/* log(2) of rexmt exp. backoff */ // RTO退让
 	short	t_rxtcur;		/* current retransmit value */
-	short	t_dupacks;		/* consecutive dup acks recd */
+	short	t_dupacks;		/* consecutive dup acks recd */ // 快重传连续 3ack 计数
 	u_short	t_maxseg;		/* maximum segment size */
 	char	t_force;		/* 1 if forcing out a byte */
 	u_short	t_flags;
@@ -108,8 +108,8 @@ struct tcpcb {
 	short	t_idle;			/* inactivity time */
 	short	t_rtt;			/* round trip time */
 	tcp_seq	t_rtseq;		/* sequence number being timed */
-	short	t_srtt;			/* smoothed round-trip time */
-	short	t_rttvar;		/* variance in round-trip time */
+	short	t_srtt;			/* smoothed round-trip time */ // 平滑RTT估计值
+	short	t_rttvar;		/* variance in round-trip time */ // RTT平均偏差
 	u_short	t_rttmin;		/* minimum rtt allowed */
 	u_long	max_sndwnd;		/* largest window peer has offered */
 

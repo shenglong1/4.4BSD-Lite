@@ -1426,6 +1426,7 @@ tcp_pulloutofband(so, ti, m)
  * Collect new round-trip time estimate
  * and update averages and current timeout.
  */
+// 根据新的rtt更新tcpcb.t_srtt和tcpcb.rttvar
 void
 tcp_xmit_timer(tp, rtt)
 	register struct tcpcb *tp;
