@@ -40,10 +40,13 @@
 /*
  * Tcp control block, one per tcp; fields:
  */
+// inpcb中的控制块,每个sockfd一个
 struct tcpcb {
 	struct	tcpiphdr *seg_next;	/* sequencing queue */
 	struct	tcpiphdr *seg_prev;
 	short	t_state;		/* state of this connection */
+
+	// t_timer[type] = elapse
 	short	t_timer[TCPT_NTIMERS];	/* tcp timers */
 	short	t_rxtshift;		/* log(2) of rexmt exp. backoff */
 	short	t_rxtcur;		/* current retransmit value */

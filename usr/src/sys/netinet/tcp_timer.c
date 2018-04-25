@@ -57,6 +57,8 @@
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
+#include "../../../../sys/netinet/tcp_timer.h"
+#include "../../../../sys/netinet/tcp_fsm.h"
 
 int	tcp_keepidle = TCPTV_KEEP_IDLE;
 int	tcp_keepintvl = TCPTV_KEEPINTVL;
@@ -65,6 +67,7 @@ int	tcp_maxidle;
 /*
  * Fast timeout routine for processing delayed acks
  */
+// 立即带上ack区flush 输出缓存中的数据到fd
 void
 tcp_fasttimo()
 {
@@ -103,10 +106,11 @@ tcp_slowtimo()
 	 * Search through tcb's and update active timers.
 	 */
 	ip = tcb.inp_next;
-	if (ip == 0) {
+	if (ip == 0) { // 当前没有任何inpcb，没有任何连接
 		splx(s);
 		return;
 	}
+	// todo: 遍历每个inpcb.tcpcb.t_timer，递减并触发tcp_usrreq
 	for (; ip != &tcb; ip = ipnxt) {
 		ipnxt = ip->inp_next;
 		tp = intotcpcb(ip);
@@ -118,12 +122,12 @@ tcp_slowtimo()
 				    PRU_SLOWTIMO, (struct mbuf *)0,
 				    (struct mbuf *)i, (struct mbuf *)0);
 				if (ipnxt->inp_prev != ip)
-					goto tpgone;
+					goto tpgone; // ip 这个tcpcb已经被删除
 			}
 		}
 		tp->t_idle++;
 		if (tp->t_rtt)
-			tp->t_rtt++;
+			tp->t_rtt++; // 某一特定报文段的rtt记录
 tpgone:
 		;
 	}
@@ -156,10 +160,12 @@ int	tcp_backoff[TCP_MAXRXTSHIFT + 1] =
 /*
  * TCP timer processing.
  */
+// slow timer后真正的处理函数
+// handle + rebind t_timer value
 struct tcpcb *
 tcp_timers(tp, timer)
-	register struct tcpcb *tp;
-	int timer;
+	register struct tcpcb *tp; // tcpcb
+	int timer; // t_timer index
 {
 	register int rexmt;
 
@@ -173,10 +179,10 @@ tcp_timers(tp, timer)
 	 */
 	case TCPT_2MSL:
 		if (tp->t_state != TCPS_TIME_WAIT &&
-		    tp->t_idle <= tcp_maxidle)
-			tp->t_timer[TCPT_2MSL] = tcp_keepintvl;
+		    tp->t_idle <= tcp_maxidle) // FIN_WAIT_2 timeout
+			tp->t_timer[TCPT_2MSL] = tcp_keepintvl; // 继续计时
 		else
-			tp = tcp_close(tp);
+			tp = tcp_close(tp); // TIME_WAIT timeout or FIN_WAIT_2 idle > maxidle
 		break;
 
 	/*
@@ -256,7 +262,7 @@ tcp_timers(tp, timer)
 	 */
 	case TCPT_PERSIST:
 		tcpstat.tcps_persisttimeo++;
-		tcp_setpersist(tp);
+		tcp_setpersist(tp); // rebind?
 		tp->t_force = 1;
 		(void) tcp_output(tp);
 		tp->t_force = 0;
@@ -266,12 +272,13 @@ tcp_timers(tp, timer)
 	 * Keep-alive timer went off; send something
 	 * or drop connection if idle for too long.
 	 */
+			// connect/keep_alive timeout
 	case TCPT_KEEP:
 		tcpstat.tcps_keeptimeo++;
-		if (tp->t_state < TCPS_ESTABLISHED)
+		if (tp->t_state < TCPS_ESTABLISHED) // connect timeout
 			goto dropit;
 		if (tp->t_inpcb->inp_socket->so_options & SO_KEEPALIVE &&
-		    tp->t_state <= TCPS_CLOSE_WAIT) {
+		    tp->t_state <= TCPS_CLOSE_WAIT) { // 如果
 		    	if (tp->t_idle >= tcp_keepidle + tcp_maxidle)
 				goto dropit;
 			/*
@@ -286,6 +293,7 @@ tcp_timers(tp, timer)
 			 * by the protocol spec, this requires the
 			 * correspondent TCP to respond.
 			 */
+			// todo: 只要idle这个总条件没超过，就无条件rebind t_timer, probe
 			tcpstat.tcps_keepprobe++;
 #ifdef TCP_COMPAT_42
 			/*
@@ -295,12 +303,13 @@ tcp_timers(tp, timer)
 			tcp_respond(tp, tp->t_template, (struct mbuf *)NULL,
 			    tp->rcv_nxt - 1, tp->snd_una - 1, 0);
 #else
+      // probe
 			tcp_respond(tp, tp->t_template, (struct mbuf *)NULL,
 			    tp->rcv_nxt, tp->snd_una - 1, 0);
 #endif
-			tp->t_timer[TCPT_KEEP] = tcp_keepintvl;
+			tp->t_timer[TCPT_KEEP] = tcp_keepintvl; // rebind 稠密超时时间 75s
 		} else
-			tp->t_timer[TCPT_KEEP] = tcp_keepidle;
+			tp->t_timer[TCPT_KEEP] = tcp_keepidle; // rebind 稀疏超时时间 2h
 		break;
 	dropit:
 		tcpstat.tcps_keepdrops++;
