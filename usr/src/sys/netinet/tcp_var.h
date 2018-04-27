@@ -40,6 +40,9 @@
 /*
  * Tcp control block, one per tcp; fields:
  */
+#include "../../../../sys/netinet/tcp.h"
+#include "../../../../sys/sys/types.h"
+
 // inpcb中的控制块,每个sockfd一个
 struct tcpcb {
 	struct	tcpiphdr *seg_next;	/* sequencing queue */
@@ -52,7 +55,7 @@ struct tcpcb {
 	short	t_rxtcur;		/* current retransmit value */
 	short	t_dupacks;		/* consecutive dup acks recd */ // 快重传连续 3ack 计数
 	u_short	t_maxseg;		/* maximum segment size */
-	char	t_force;		/* 1 if forcing out a byte */
+	char	t_force;		/* 1 if forcing out a byte */ // persist or urg
 	u_short	t_flags;
 #define	TF_ACKNOW	0x0001		/* ack peer immediately */
 #define	TF_DELACK	0x0002		/* ack, but try to delay it */
@@ -83,14 +86,14 @@ struct tcpcb {
 /* receive sequence variables */
 	// todo: 接收窗口
 	u_long	rcv_wnd;		/* receive window */
-	tcp_seq	rcv_nxt;		/* receive next */
+	tcp_seq	rcv_nxt;		/* receive next */ // 未按序接收的起点
 	tcp_seq	rcv_up;			/* receive urgent pointer */
 	tcp_seq	irs;			/* initial receive sequence number */
 /*
  * Additional variables for this implementation.
  */
 /* receive variables */
-	tcp_seq	rcv_adv;		/* advertised window */
+	tcp_seq	rcv_adv;		/* advertised window */ // 接收窗口最右沿
 /* retransmit variables */
 	tcp_seq	snd_max;		/* highest sequence number sent;
 					 * used to recognize retransmits

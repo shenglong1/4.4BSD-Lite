@@ -57,6 +57,14 @@
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
+#include <strings.h>
+#include "../../contrib/sort/sort.h"
+#include "../../../../sys/netinet/tcp.h"
+#include "../../../../sys/netinet/tcp_timer.h"
+#include "../../../../sys/netinet/tcp_var.h"
+#include "../../../../sys/netinet/tcp_seq.h"
+#include "../../../../sys/sys/socketvar.h"
+#include "../../../../sys/libkern/libkern.h"
 
 #ifdef notyet
 extern struct mbuf *m_copypack();
@@ -68,9 +76,11 @@ extern struct mbuf *m_copypack();
 /*
  * Tcp output routine: figure out what should be sent and send it.
  */
+// todo: 先更新tcpcb状态，再判断是否要发送某种数据,然后发送
+// 可能发送的：data, control(PERSIST, RTO, URG), ack, win, FIN
 int
 tcp_output(tp)
-	register struct tcpcb *tp;
+		register struct tcpcb *tp;
 {
 	register struct socket *so = tp->t_inpcb->inp_socket;
 	register long len, win;
@@ -87,18 +97,18 @@ tcp_output(tp)
 	 * If there is some data or critical controls (SYN, RST)
 	 * to send, then transmit; otherwise, investigate further.
 	 */
-	idle = (tp->snd_max == tp->snd_una);
+	idle = (tp->snd_max == tp->snd_una); // 发送的所有都确认了,不期待对方ack
 	if (idle && tp->t_idle >= tp->t_rxtcur)
 		/*
 		 * We have been idle for "a while" and no acks are
 		 * expected to clock out any data we send --
 		 * slow start to get ack "clock" running again.
 		 */
-		tp->snd_cwnd = tp->t_maxseg;
-again:
+		tp->snd_cwnd = tp->t_maxseg; // todo: 开始慢启动???
+	again:
 	sendalot = 0;
-	off = tp->snd_nxt - tp->snd_una;
-	win = min(tp->snd_wnd, tp->snd_cwnd);
+	off = tp->snd_nxt - tp->snd_una; // 发送了但未确认的
+	win = min(tp->snd_wnd, tp->snd_cwnd); // 当前发送窗口大小
 
 	flags = tcp_outflags[tp->t_state];
 	/*
@@ -107,7 +117,7 @@ again:
 	 * and timer expired, we will send what we can
 	 * and go to transmit state.
 	 */
-	if (tp->t_force) {
+	if (tp->t_force) { // persist timeout send or urg send
 		if (win == 0) {
 			/*
 			 * If we still have some data to send, then
@@ -125,15 +135,19 @@ again:
 			 * to send then the probe will be the FIN
 			 * itself.
 			 */
+			// persist timeout send
 			if (off < so->so_snd.sb_cc)
-				flags &= ~TH_FIN;
+				flags &= ~TH_FIN; // 如果还有数据在发送缓冲中未发送，清除FIN
 			win = 1;
 		} else {
+			// urg send
+			// 重置PERSIST timer
 			tp->t_timer[TCPT_PERSIST] = 0;
 			tp->t_rxtshift = 0;
 		}
 	}
 
+	// 计算实际上还能发送的数据量,且这些数据在窗口中
 	len = min(so->so_snd.sb_cc, win) - off;
 
 	if (len < 0) {
@@ -147,20 +161,25 @@ again:
 		 * state below.  If the window didn't close completely,
 		 * just wait for an ACK.
 		 */
+		// 窗口减小了
+		// 发送缓冲区中要发送的数据少了, 可能是已经发完了
 		len = 0;
-		if (win == 0) {
+		if (win == 0) { // 对端通知窗口为0，则停止重传，进入PERSIST状态
 			tp->t_timer[TCPT_REXMT] = 0;
 			tp->snd_nxt = tp->snd_una;
 		}
 	}
-	if (len > tp->t_maxseg) {
+	// len > 0 还有数据可以发送
+	if (len > tp->t_maxseg) { // 还能发多个mss
 		len = tp->t_maxseg;
 		sendalot = 1;
 	}
+	// 窗口中还能发送的<所有要发送的，就是说当前窗口发完，仍然还有数据要发送的话
 	if (SEQ_LT(tp->snd_nxt + len, tp->snd_una + so->so_snd.sb_cc))
 		flags &= ~TH_FIN;
 
-	win = sbspace(&so->so_rcv);
+	// todo: 下面处理本地接收窗口
+	win = sbspace(&so->so_rcv); // todo: 重算本地接收缓冲可用空间
 
 	/*
 	 * Sender silly window avoidance.  If connection is idle
@@ -172,17 +191,19 @@ again:
 	 * If retransmitting (possibly after persist timer forced us
 	 * to send into a small window), then must resend.
 	 */
+	// todo: 避免糊涂窗口综合征SWS的做法
+	// todo: 确定是否向对方发送数据，PERSIST, URG
 	if (len) {
-		if (len == tp->t_maxseg)
+		if (len == tp->t_maxseg) // 剩余发送大小为mss，则发送
 			goto send;
-		if ((idle || tp->t_flags & TF_NODELAY) &&
-		    len + off >= so->so_snd.sb_cc)
+		if ((idle || tp->t_flags & TF_NODELAY) && // nodelay 且此次发送可以清空buffer,直接发
+				len + off >= so->so_snd.sb_cc)
 			goto send;
-		if (tp->t_force)
+		if (tp->t_force) // force 模式，直接发(PERSIST或urg数据)
 			goto send;
-		if (len >= tp->max_sndwnd / 2)
+		if (len >= tp->max_sndwnd / 2) // 发送窗口剩余空间是最大窗口的一半时，直接发
 			goto send;
-		if (SEQ_LT(tp->snd_nxt, tp->snd_max))
+		if (SEQ_LT(tp->snd_nxt, tp->snd_max)) // 正在超时重传时，直接发
 			goto send;
 	}
 
@@ -193,16 +214,18 @@ again:
 	 * max size segments, or at least 50% of the maximum possible
 	 * window, then want to send a window update to peer.
 	 */
+	// todo: 确定是否向对端发送窗口更新
 	if (win > 0) {
 		/* 
 		 * "adv" is the amount we can increase the window,
 		 * taking into account that we are limited by
 		 * TCP_MAXWIN << tp->rcv_scale.
 		 */
+		// 重算本地接收窗口大小, 包括窗口扩展选项
 		long adv = min(win, (long)TCP_MAXWIN << tp->rcv_scale) -
-			(tp->rcv_adv - tp->rcv_nxt);
+							 (tp->rcv_adv - tp->rcv_nxt); // adv是在当前rcv_win基础上，还能展开的recv_win数量
 
-		if (adv >= (long) (2 * tp->t_maxseg))
+		if (adv >= (long) (2 * tp->t_maxseg)) // 接收窗口增加量>2mss，立刻通知对端recv win大小
 			goto send;
 		if (2 * adv >= (long) so->so_rcv.sb_hiwat)
 			goto send;
@@ -211,6 +234,7 @@ again:
 	/*
 	 * Send if we owe peer an ACK.
 	 */
+	// todo: 判断是否立即向对方发ack
 	if (tp->t_flags & TF_ACKNOW)
 		goto send;
 	if (flags & (TH_SYN|TH_RST))
@@ -222,8 +246,10 @@ again:
 	 * and we have not yet done so, or we're retransmitting the FIN,
 	 * then we need to send.
 	 */
+	// todo: 确定是否要发FIN
+	// 有FIN，且FIN未发送或FIN等待重传
 	if (flags & TH_FIN &&
-	    ((tp->t_flags & TF_SENTFIN) == 0 || tp->snd_nxt == tp->snd_una))
+			((tp->t_flags & TF_SENTFIN) == 0 || tp->snd_nxt == tp->snd_una))
 		goto send;
 
 	/*
@@ -248,10 +274,11 @@ again:
 	 * if window is nonzero, transmit what we can,
 	 * otherwise force out a byte.
 	 */
+	// todo: 判断是否要进入PERSIST状态
 	if (so->so_snd.sb_cc && tp->t_timer[TCPT_REXMT] == 0 &&
-	    tp->t_timer[TCPT_PERSIST] == 0) {
+			tp->t_timer[TCPT_PERSIST] == 0) {
 		tp->t_rxtshift = 0;
-		tcp_setpersist(tp);
+		tcp_setpersist(tp); // 超时重传停止,唯一可能就是发送窗口为0了, 进入PERSIST模式
 	}
 
 	/*
@@ -268,6 +295,7 @@ send:
 	 * link header, i.e.
 	 *	max_linkhdr + sizeof (struct tcpiphdr) + optlen <= MHLEN
 	 */
+	// 发送第一个SYN? 协商窗口scale
 	optlen = 0;
 	hdrlen = sizeof (struct tcpiphdr);
 	if (flags & TH_SYN) {
@@ -280,52 +308,53 @@ send:
 			mss = htons((u_short) tcp_mss(tp, 0));
 			bcopy((caddr_t)&mss, (caddr_t)(opt + 2), sizeof(mss));
 			optlen = 4;
-	 
+
 			if ((tp->t_flags & TF_REQ_SCALE) &&
-			    ((flags & TH_ACK) == 0 ||
-			    (tp->t_flags & TF_RCVD_SCALE))) {
+					((flags & TH_ACK) == 0 ||
+					 (tp->t_flags & TF_RCVD_SCALE))) {
 				*((u_long *) (opt + optlen)) = htonl(
-					TCPOPT_NOP << 24 |
-					TCPOPT_WINDOW << 16 |
-					TCPOLEN_WINDOW << 8 |
-					tp->request_r_scale);
+						TCPOPT_NOP << 24 |
+						TCPOPT_WINDOW << 16 |
+						TCPOLEN_WINDOW << 8 |
+						tp->request_r_scale);
 				optlen += 4;
 			}
 		}
- 	}
- 
- 	/*
-	 * Send a timestamp and echo-reply if this is a SYN and our side 
-	 * wants to use timestamps (TF_REQ_TSTMP is set) or both our side
-	 * and our peer have sent timestamps in our SYN's.
- 	 */
- 	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
- 	     (flags & TH_RST) == 0 &&
- 	    ((flags & (TH_SYN|TH_ACK)) == TH_SYN ||
-	     (tp->t_flags & TF_RCVD_TSTMP))) {
-		u_long *lp = (u_long *)(opt + optlen);
- 
- 		/* Form timestamp option as shown in appendix A of RFC 1323. */
- 		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
- 		*lp++ = htonl(tcp_now);
- 		*lp   = htonl(tp->ts_recent);
- 		optlen += TCPOLEN_TSTAMP_APPA;
- 	}
+	}
 
- 	hdrlen += optlen;
- 
+	/*
+  * Send a timestamp and echo-reply if this is a SYN and our side
+  * wants to use timestamps (TF_REQ_TSTMP is set) or both our side
+  * and our peer have sent timestamps in our SYN's.
+   */
+	// 协商timestamp
+	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
+			(flags & TH_RST) == 0 &&
+			((flags & (TH_SYN|TH_ACK)) == TH_SYN ||
+			 (tp->t_flags & TF_RCVD_TSTMP))) {
+		u_long *lp = (u_long *)(opt + optlen);
+
+		/* Form timestamp option as shown in appendix A of RFC 1323. */
+		*lp++ = htonl(TCPOPT_TSTAMP_HDR);
+		*lp++ = htonl(tcp_now);
+		*lp   = htonl(tp->ts_recent);
+		optlen += TCPOLEN_TSTAMP_APPA;
+	}
+
+	hdrlen += optlen;
+
 	/*
 	 * Adjust data length if insertion of options will
 	 * bump the packet length beyond the t_maxseg length.
 	 */
-	 if (len > tp->t_maxseg - optlen) {
+	if (len > tp->t_maxseg - optlen) {
 		len = tp->t_maxseg - optlen;
 		sendalot = 1;
-	 }
+	}
 
 
 #ifdef DIAGNOSTIC
- 	if (max_linkhdr + hdrlen > MHLEN)
+	if (max_linkhdr + hdrlen > MHLEN)
 		panic("tcphdr too big");
 #endif
 
@@ -335,6 +364,7 @@ send:
 	 * the template for sends on this connection.
 	 */
 	if (len) {
+		// todo: 发送的是data
 		if (tp->t_force && len == 1)
 			tcpstat.tcps_sndprobe++;
 		else if (SEQ_LT(tp->snd_nxt, tp->snd_max)) {
@@ -356,6 +386,7 @@ send:
 		m->m_len += hdrlen;
 		m->m_data -= hdrlen;
 #else
+		// todo: 从这里开始构造第一个mbuf来承载发送data
 		MGETHDR(m, M_DONTWAIT, MT_HEADER);
 		if (m == NULL) {
 			error = ENOBUFS;
@@ -365,7 +396,7 @@ send:
 		m->m_len = hdrlen;
 		if (len <= MHLEN - hdrlen - max_linkhdr) {
 			m_copydata(so->so_snd.sb_mb, off, (int) len,
-			    mtod(m, caddr_t) + hdrlen);
+								 mtod(m, caddr_t) + hdrlen);
 			m->m_len += len;
 		} else {
 			m->m_next = m_copy(so->so_snd.sb_mb, off, (int) len);
@@ -382,11 +413,12 @@ send:
 		if (off + len == so->so_snd.sb_cc)
 			flags |= TH_PUSH;
 	} else {
-		if (tp->t_flags & TF_ACKNOW)
+		// todo: 发送的是非data
+		if (tp->t_flags & TF_ACKNOW) // ack
 			tcpstat.tcps_sndacks++;
-		else if (flags & (TH_SYN|TH_FIN|TH_RST))
+		else if (flags & (TH_SYN|TH_FIN|TH_RST)) // syn,fin,rst
 			tcpstat.tcps_sndctrl++;
-		else if (SEQ_GT(tp->snd_up, tp->snd_una))
+		else if (SEQ_GT(tp->snd_up, tp->snd_una)) // urg
 			tcpstat.tcps_sndurg++;
 		else
 			tcpstat.tcps_sndwinup++;
@@ -410,8 +442,9 @@ send:
 	 * window for use in delaying messages about window sizes.
 	 * If resending a FIN, be sure not to use a new sequence number.
 	 */
-	if (flags & TH_FIN && tp->t_flags & TF_SENTFIN && 
-	    tp->snd_nxt == tp->snd_max)
+	if (flags & TH_FIN && tp->t_flags & TF_SENTFIN &&
+			tp->snd_nxt == tp->snd_max)
+		// 如果是重发FIN
 		tp->snd_nxt--;
 	/*
 	 * If we are doing retransmissions, then snd_nxt will
@@ -440,6 +473,7 @@ send:
 	 * Calculate receive window.  Don't shrink window,
 	 * but avoid silly window syndrome.
 	 */
+	// todo: 计算rwin大小
 	if (win < (long)(so->so_rcv.sb_hiwat / 4) && win < (long)tp->t_maxseg)
 		win = 0;
 	if (win > (long)TCP_MAXWIN << tp->rcv_scale)
@@ -465,7 +499,7 @@ send:
 	 */
 	if (len + optlen)
 		ti->ti_len = htons((u_short)(sizeof (struct tcphdr) +
-		    optlen + len));
+																 optlen + len));
 	ti->ti_sum = in_cksum(m, (int)(hdrlen + len));
 
 	/*
@@ -473,6 +507,7 @@ send:
 	 * the retransmit.  In persist state, just set snd_max.
 	 */
 	if (tp->t_force == 0 || tp->t_timer[TCPT_PERSIST] == 0) {
+		// 发送或重传 模式下
 		tcp_seq startseq = tp->snd_nxt;
 
 		/*
@@ -509,7 +544,8 @@ send:
 		 * of retransmit time.
 		 */
 		if (tp->t_timer[TCPT_REXMT] == 0 &&
-		    tp->snd_nxt != tp->snd_una) {
+				tp->snd_nxt != tp->snd_una) {
+			// 非重传是，即第一次发送时，启动RTO, 清空PERSIST
 			tp->t_timer[TCPT_REXMT] = tp->t_rxtcur;
 			if (tp->t_timer[TCPT_PERSIST]) {
 				tp->t_timer[TCPT_PERSIST] = 0;
@@ -517,8 +553,9 @@ send:
 			}
 		}
 	} else
-		if (SEQ_GT(tp->snd_nxt + len, tp->snd_max))
-			tp->snd_max = tp->snd_nxt + len;
+		// force == 1 && PERSIST mode
+	if (SEQ_GT(tp->snd_nxt + len, tp->snd_max))
+		tp->snd_max = tp->snd_nxt + len;
 
 	/*
 	 * Trace.
@@ -538,26 +575,27 @@ send:
 		error = tuba_output(m, tp);
 	else
 #endif
-    {
-	((struct ip *)ti)->ip_len = m->m_pkthdr.len;
-	((struct ip *)ti)->ip_ttl = tp->t_inpcb->inp_ip.ip_ttl;	/* XXX */
-	((struct ip *)ti)->ip_tos = tp->t_inpcb->inp_ip.ip_tos;	/* XXX */
+	{
+    // tcp make ip hdr
+		((struct ip *)ti)->ip_len = m->m_pkthdr.len;
+		((struct ip *)ti)->ip_ttl = tp->t_inpcb->inp_ip.ip_ttl;	/* XXX */
+		((struct ip *)ti)->ip_tos = tp->t_inpcb->inp_ip.ip_tos;	/* XXX */
 #if BSD >= 43
-	error = ip_output(m, tp->t_inpcb->inp_options, &tp->t_inpcb->inp_route,
+		error = ip_output(m, tp->t_inpcb->inp_options, &tp->t_inpcb->inp_route,
 	    so->so_options & SO_DONTROUTE, 0);
 #else
-	error = ip_output(m, (struct mbuf *)0, &tp->t_inpcb->inp_route, 
-	    so->so_options & SO_DONTROUTE);
+		error = ip_output(m, (struct mbuf *)0, &tp->t_inpcb->inp_route,
+											so->so_options & SO_DONTROUTE);
 #endif
-    }
+	}
 	if (error) {
-out:
+		out:
 		if (error == ENOBUFS) {
 			tcp_quench(tp->t_inpcb, 0);
 			return (0);
 		}
 		if ((error == EHOSTUNREACH || error == ENETDOWN)
-		    && TCPS_HAVERCVDSYN(tp->t_state)) {
+				&& TCPS_HAVERCVDSYN(tp->t_state)) {
 			tp->t_softerror = error;
 			return (0);
 		}
@@ -583,7 +621,7 @@ out:
 // persist超时时调用
 void
 tcp_setpersist(tp)
-	register struct tcpcb *tp;
+		register struct tcpcb *tp;
 {
 	register t = ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1;
 
@@ -595,8 +633,8 @@ tcp_setpersist(tp)
 	// 重新计算数值，设置persist的t_timer
 	// tp->t_timer[TCPT_PERSIST] = t * tcp_backoff[tp_t_rxtshift]
 	TCPT_RANGESET(tp->t_timer[TCPT_PERSIST],
-	    t * tcp_backoff[tp->t_rxtshift],
-	    TCPTV_PERSMIN, TCPTV_PERSMAX);
+								t * tcp_backoff[tp->t_rxtshift],
+								TCPTV_PERSMIN, TCPTV_PERSMAX);
 	if (tp->t_rxtshift < TCP_MAXRXTSHIFT)
 		tp->t_rxtshift++;
 }
