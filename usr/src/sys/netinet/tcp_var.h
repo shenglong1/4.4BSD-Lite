@@ -108,7 +108,7 @@ struct tcpcb {
  * transmit timing stuff.  See below for scale of srtt and rttvar.
  * "Variance" is actually smoothed difference.
  */
-	short	t_idle;			/* inactivity time */
+	short	t_idle;			/* inactivity time */ // 没收到对方数据的累计时间
 	short	t_rtt;			/* round trip time */
 	tcp_seq	t_rtseq;		/* sequence number being timed */
 	short	t_srtt;			/* smoothed round-trip time */ // 平滑RTT估计值

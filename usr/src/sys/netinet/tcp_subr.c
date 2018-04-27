@@ -102,12 +102,14 @@ tcp_template(tp)
 		m->m_len = sizeof (struct tcpiphdr);
 		n = mtod(m, struct tcpiphdr *);
 	}
+  // ip part
 	n->ti_next = n->ti_prev = 0;
 	n->ti_x1 = 0;
 	n->ti_pr = IPPROTO_TCP;
 	n->ti_len = htons(sizeof (struct tcpiphdr) - sizeof (struct ip));
 	n->ti_src = inp->inp_laddr;
 	n->ti_dst = inp->inp_faddr;
+	// tcp part
 	n->ti_sport = inp->inp_lport;
 	n->ti_dport = inp->inp_fport;
 	n->ti_seq = 0;
@@ -138,7 +140,7 @@ void
 tcp_respond(tp, ti, m, ack, seq, flags)
 	struct tcpcb *tp;
 	register struct tcpiphdr *ti;
-	register struct mbuf *m;
+	register struct mbuf *m; // 引发当前调用的上一个接收到的报文
 	tcp_seq ack, seq;
 	int flags;
 {
@@ -151,6 +153,7 @@ tcp_respond(tp, ti, m, ack, seq, flags)
 		ro = &tp->t_inpcb->inp_route;
 	}
 	if (m == 0) {
+		// todo: 发送keep_alive
 		m = m_gethdr(M_DONTWAIT, MT_HEADER);
 		if (m == NULL)
 			return;
@@ -164,7 +167,9 @@ tcp_respond(tp, ti, m, ack, seq, flags)
 		ti = mtod(m, struct tcpiphdr *);
 		flags = TH_ACK;
 	} else {
-		m_freem(m->m_next);
+		// 发送RST
+		// mbuf是引发RST的接收到的报文
+		m_freem(m->m_next); // 释放多余mbuf，这里RST报文只需要mbuf第一个节点
 		m->m_next = 0;
 		m->m_data = (caddr_t)ti;
 		m->m_len = sizeof (struct tcpiphdr);

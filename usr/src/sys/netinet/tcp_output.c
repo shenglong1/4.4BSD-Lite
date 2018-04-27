@@ -65,6 +65,7 @@
 #include "../../../../sys/netinet/tcp_seq.h"
 #include "../../../../sys/sys/socketvar.h"
 #include "../../../../sys/libkern/libkern.h"
+#include "../../../../sys/hp300/include/endian.h"
 
 #ifdef notyet
 extern struct mbuf *m_copypack();
@@ -91,13 +92,14 @@ tcp_output(tp)
 	unsigned optlen, hdrlen;
 	int idle, sendalot;
 
+	/*************************** step 1: update tcpcb.swnd/rwnd *****************************************/
 	/*
 	 * Determine length of data that should be transmitted,
 	 * and flags that will be used.
 	 * If there is some data or critical controls (SYN, RST)
 	 * to send, then transmit; otherwise, investigate further.
 	 */
-	idle = (tp->snd_max == tp->snd_una); // 发送的所有都确认了,不期待对方ack
+	idle = (tp->snd_max == tp->snd_una); // true: 发送的所有都确认了,不期待对方ack
 	if (idle && tp->t_idle >= tp->t_rxtcur)
 		/*
 		 * We have been idle for "a while" and no acks are
@@ -105,19 +107,21 @@ tcp_output(tp)
 		 * slow start to get ack "clock" running again.
 		 */
 		tp->snd_cwnd = tp->t_maxseg; // todo: 开始慢启动???
-	again:
+
+again:
 	sendalot = 0;
 	off = tp->snd_nxt - tp->snd_una; // 发送了但未确认的
 	win = min(tp->snd_wnd, tp->snd_cwnd); // 当前发送窗口大小
 
-	flags = tcp_outflags[tp->t_state];
+	flags = tcp_outflags[tp->t_state]; // 当前连接状态下的发送报文段flag标志
 	/*
 	 * If in persist timeout with window of 0, send 1 byte.
 	 * Otherwise, if window is small but nonzero
 	 * and timer expired, we will send what we can
 	 * and go to transmit state.
 	 */
-	if (tp->t_force) { // persist timeout send or urg send
+	// persist timeout send or urg send
+	if (tp->t_force) {
 		if (win == 0) {
 			/*
 			 * If we still have some data to send, then
@@ -138,7 +142,7 @@ tcp_output(tp)
 			// persist timeout send
 			if (off < so->so_snd.sb_cc)
 				flags &= ~TH_FIN; // 如果还有数据在发送缓冲中未发送，清除FIN
-			win = 1;
+			win = 1; // 设置win=1是为了能发送PERSIST probe
 		} else {
 			// urg send
 			// 重置PERSIST timer
@@ -167,6 +171,7 @@ tcp_output(tp)
 		if (win == 0) { // 对端通知窗口为0，则停止重传，进入PERSIST状态
 			tp->t_timer[TCPT_REXMT] = 0;
 			tp->snd_nxt = tp->snd_una;
+      // 进入PERSIST状态
 		}
 	}
 	// len > 0 还有数据可以发送
@@ -178,9 +183,10 @@ tcp_output(tp)
 	if (SEQ_LT(tp->snd_nxt + len, tp->snd_una + so->so_snd.sb_cc))
 		flags &= ~TH_FIN;
 
-	// todo: 下面处理本地接收窗口
-	win = sbspace(&so->so_rcv); // todo: 重算本地接收缓冲可用空间
+	// todo: 重算本地接收缓冲可用空间
+	win = sbspace(&so->so_rcv);
 
+	/*************************** step 2: 判断发送的是什么，是否能发送 *****************************************/
 	/*
 	 * Sender silly window avoidance.  If connection is idle
 	 * and can send all data, a maximum segment,
@@ -192,6 +198,7 @@ tcp_output(tp)
 	 * to send into a small window), then must resend.
 	 */
 	// todo: 避免糊涂窗口综合征SWS的做法
+	// 就是说，不是有数据就发送，而是达到一定条件才发，避免小报文
 	// todo: 确定是否向对方发送数据，PERSIST, URG
 	if (len) {
 		if (len == tp->t_maxseg) // 剩余发送大小为mss，则发送
@@ -215,6 +222,7 @@ tcp_output(tp)
 	 * window, then want to send a window update to peer.
 	 */
 	// todo: 确定是否向对端发送窗口更新
+  // 包含SWS处理，不告知小窗口
 	if (win > 0) {
 		/* 
 		 * "adv" is the amount we can increase the window,
@@ -235,7 +243,7 @@ tcp_output(tp)
 	 * Send if we owe peer an ACK.
 	 */
 	// todo: 判断是否立即向对方发ack
-	if (tp->t_flags & TF_ACKNOW)
+	if (tp->t_flags & TF_ACKNOW) // ack超时，未按序接收时立即告知对方，SYN三次握手立即ack
 		goto send;
 	if (flags & (TH_SYN|TH_RST))
 		goto send;
@@ -275,7 +283,7 @@ tcp_output(tp)
 	 * otherwise force out a byte.
 	 */
 	// todo: 判断是否要进入PERSIST状态
-	if (so->so_snd.sb_cc && tp->t_timer[TCPT_REXMT] == 0 &&
+	if (so->so_snd.sb_cc && tp->t_timer[TCPT_REXMT] == 0 && // 重传定时器唯一被清空的机会是win=0, 所以这里启动PERSIST timer
 			tp->t_timer[TCPT_PERSIST] == 0) {
 		tp->t_rxtshift = 0;
 		tcp_setpersist(tp); // 超时重传停止,唯一可能就是发送窗口为0了, 进入PERSIST模式
@@ -286,6 +294,7 @@ tcp_output(tp)
 	 */
 	return (0);
 
+	/*************************** step 3: make mbuf=tcpiphdr+opt+data *****************************************/
 send:
 	/*
 	 * Before ESTABLISHED, force sending of initial options
@@ -296,9 +305,12 @@ send:
 	 *	max_linkhdr + sizeof (struct tcpiphdr) + optlen <= MHLEN
 	 */
 	// 发送第一个SYN? 协商窗口scale
+  // 建立opt[8] mss + req_scale
 	optlen = 0;
 	hdrlen = sizeof (struct tcpiphdr);
-	if (flags & TH_SYN) {
+
+	// todo: make opt mss, win scale
+	if (flags & TH_SYN) { // 无论是主动打开还是被动打开，都要协商opt
 		tp->snd_nxt = tp->iss;
 		if ((tp->t_flags & TF_NOOPT) == 0) {
 			u_short mss;
@@ -311,12 +323,12 @@ send:
 
 			if ((tp->t_flags & TF_REQ_SCALE) &&
 					((flags & TH_ACK) == 0 ||
-					 (tp->t_flags & TF_RCVD_SCALE))) {
+					 (tp->t_flags & TF_RCVD_SCALE))) { // 只有在主动SYN或被动连接且对端由REQ_SCALE时(即对端开启选项时)，才能发窗口opt
 				*((u_long *) (opt + optlen)) = htonl(
 						TCPOPT_NOP << 24 |
 						TCPOPT_WINDOW << 16 |
 						TCPOLEN_WINDOW << 8 |
-						tp->request_r_scale);
+						tp->request_r_scale); // 主动或被动SYN时，都要计算窗口opt值
 				optlen += 4;
 			}
 		}
@@ -327,7 +339,9 @@ send:
   * wants to use timestamps (TF_REQ_TSTMP is set) or both our side
   * and our peer have sent timestamps in our SYN's.
    */
+	// todo: make opt
 	// 协商timestamp
+	// 添加timestamp 12字节 选项到opt
 	if ((tp->t_flags & (TF_REQ_TSTMP|TF_NOOPT)) == TF_REQ_TSTMP &&
 			(flags & TH_RST) == 0 &&
 			((flags & (TH_SYN|TH_ACK)) == TH_SYN ||
@@ -347,6 +361,7 @@ send:
 	 * Adjust data length if insertion of options will
 	 * bump the packet length beyond the t_maxseg length.
 	 */
+  // 有opt情况下，重新计算数据长度len
 	if (len > tp->t_maxseg - optlen) {
 		len = tp->t_maxseg - optlen;
 		sendalot = 1;
@@ -363,6 +378,8 @@ send:
 	 * be transmitted, and initialize the header from
 	 * the template for sends on this connection.
 	 */
+	// todo: make mbuf include tcpiphdr,opt and data
+	// 这里只是copy data到mbuf，还没有做header
 	if (len) {
 		// todo: 发送的是data
 		if (tp->t_force && len == 1)
@@ -387,19 +404,21 @@ send:
 		m->m_data -= hdrlen;
 #else
 		// todo: 从这里开始构造第一个mbuf来承载发送data
-		MGETHDR(m, M_DONTWAIT, MT_HEADER);
+		MGETHDR(m, M_DONTWAIT, MT_HEADER); // 为ip/tcp首部建立mbuf
 		if (m == NULL) {
 			error = ENOBUFS;
 			goto out;
 		}
 		m->m_data += max_linkhdr;
 		m->m_len = hdrlen;
-		if (len <= MHLEN - hdrlen - max_linkhdr) {
+		// 一个mbuf足够承载: tcpiphdr + opt + data
+		if (len <= MHLEN - hdrlen - max_linkhdr) { // 仅copy data to mbuf
 			m_copydata(so->so_snd.sb_mb, off, (int) len,
 								 mtod(m, caddr_t) + hdrlen);
 			m->m_len += len;
 		} else {
-			m->m_next = m_copy(so->so_snd.sb_mb, off, (int) len);
+      // 两个mbuf承载
+			m->m_next = m_copy(so->so_snd.sb_mb, off, (int) len); // 仅copy data to mbuf
 			if (m->m_next == 0)
 				len = 0;
 		}
@@ -410,10 +429,11 @@ send:
 		 * give data to the user when a buffer fills or
 		 * a PUSH comes in.)
 		 */
+		// 如果发送了缓存中所有数据，则设置PUSH标志
 		if (off + len == so->so_snd.sb_cc)
 			flags |= TH_PUSH;
 	} else {
-		// todo: 发送的是非data
+		// todo: 发送的是非data, mbuf包含data
 		if (tp->t_flags & TF_ACKNOW) // ack
 			tcpstat.tcps_sndacks++;
 		else if (flags & (TH_SYN|TH_FIN|TH_RST)) // syn,fin,rst
@@ -435,8 +455,10 @@ send:
 	ti = mtod(m, struct tcpiphdr *);
 	if (tp->t_template == 0)
 		panic("tcp_output");
+	// copy header, 包括伪首部
 	bcopy((caddr_t)tp->t_template, (caddr_t)ti, sizeof (struct tcpiphdr));
 
+	// todo: 上面完成了mbuf填充，现在来填充mbuf.tcpiphdr.seq/ack/chksum/win/len
 	/*
 	 * Fill in fields, remembering maximum advertised
 	 * window for use in delaying messages about window sizes.
@@ -459,12 +481,13 @@ send:
 	 * case, since we know we aren't doing a retransmission.
 	 * (retransmit and persist are mutually exclusive...)
 	 */
+	// 设置mbuf中的tcp header(seq, ack, len, win, chksum)
 	if (len || (flags & (TH_SYN|TH_FIN)) || tp->t_timer[TCPT_PERSIST])
 		ti->ti_seq = htonl(tp->snd_nxt);
 	else
 		ti->ti_seq = htonl(tp->snd_max);
 	ti->ti_ack = htonl(tp->rcv_nxt);
-	if (optlen) {
+	if (optlen) { // copy opt
 		bcopy((caddr_t)opt, (caddr_t)(ti + 1), optlen);
 		ti->ti_off = (sizeof (struct tcphdr) + optlen) >> 2;
 	}
@@ -473,7 +496,7 @@ send:
 	 * Calculate receive window.  Don't shrink window,
 	 * but avoid silly window syndrome.
 	 */
-	// todo: 计算rwin大小
+	// todo: 计算rwin大小,随发送报文告知
 	if (win < (long)(so->so_rcv.sb_hiwat / 4) && win < (long)tp->t_maxseg)
 		win = 0;
 	if (win > (long)TCP_MAXWIN << tp->rcv_scale)
@@ -481,10 +504,10 @@ send:
 	if (win < (long)(tp->rcv_adv - tp->rcv_nxt))
 		win = (long)(tp->rcv_adv - tp->rcv_nxt);
 	ti->ti_win = htons((u_short) (win>>tp->rcv_scale));
-	if (SEQ_GT(tp->snd_up, tp->snd_nxt)) {
+	if (SEQ_GT(tp->snd_up, tp->snd_nxt)) { // 处理urg
 		ti->ti_urp = htons((u_short)(tp->snd_up - tp->snd_nxt));
 		ti->ti_flags |= TH_URG;
-	} else
+	} else // 没有urg
 		/*
 		 * If no urgent pointer to send, then we pull
 		 * the urgent pointer to the left edge of the send window
@@ -502,13 +525,14 @@ send:
 																 optlen + len));
 	ti->ti_sum = in_cksum(m, (int)(hdrlen + len));
 
+	/*************************** step 4: send *****************************************/
 	/*
 	 * In transmit state, time the transmission and arrange for
 	 * the retransmit.  In persist state, just set snd_max.
 	 */
 	if (tp->t_force == 0 || tp->t_timer[TCPT_PERSIST] == 0) {
 		// 发送或重传 模式下
-		tcp_seq startseq = tp->snd_nxt;
+		tcp_seq startseq = tp->snd_nxt; // 用第一个seq来统计RTT
 
 		/*
 		 * Advance snd_nxt over sequence space of this segment.
@@ -543,6 +567,7 @@ send:
 		 * Initialize shift counter which is used for backoff
 		 * of retransmit time.
 		 */
+		// 开启重传定时器
 		if (tp->t_timer[TCPT_REXMT] == 0 &&
 				tp->snd_nxt != tp->snd_una) {
 			// 非重传是，即第一次发送时，启动RTO, 清空PERSIST
@@ -581,6 +606,7 @@ send:
 		((struct ip *)ti)->ip_ttl = tp->t_inpcb->inp_ip.ip_ttl;	/* XXX */
 		((struct ip *)ti)->ip_tos = tp->t_inpcb->inp_ip.ip_tos;	/* XXX */
 #if BSD >= 43
+    // todo: 发送到ip层
 		error = ip_output(m, tp->t_inpcb->inp_options, &tp->t_inpcb->inp_route,
 	    so->so_options & SO_DONTROUTE, 0);
 #else
@@ -588,9 +614,11 @@ send:
 											so->so_options & SO_DONTROUTE);
 #endif
 	}
+	/*************************** step 5: error处理，tp更新 *****************************************/
 	if (error) {
 		out:
 		if (error == ENOBUFS) {
+			// ip层建立mbuf失败或接口层输出队列满，则cwnd=mss开始慢启动
 			tcp_quench(tp->t_inpcb, 0);
 			return (0);
 		}
@@ -610,11 +638,11 @@ send:
 	 * Any pending ACK has now been sent.
 	 */
 	if (win > 0 && SEQ_GT(tp->rcv_nxt+win, tp->rcv_adv))
-		tp->rcv_adv = tp->rcv_nxt + win;
+		tp->rcv_adv = tp->rcv_nxt + win; // ???
 	tp->last_ack_sent = tp->rcv_nxt;
 	tp->t_flags &= ~(TF_ACKNOW|TF_DELACK);
 	if (sendalot)
-		goto again;
+		goto again; // 回去继续发送
 	return (0);
 }
 
