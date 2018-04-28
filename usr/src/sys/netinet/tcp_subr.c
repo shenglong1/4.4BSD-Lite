@@ -58,6 +58,8 @@
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
+#include "../../../../sys/netinet/tcp_fsm.h"
+#include "../../../../sys/netinet/tcp_var.h"
 
 /* patchable/settable parameters for tcp */
 int 	tcp_mssdflt = TCP_MSS;
@@ -246,6 +248,7 @@ tcp_newtcpcb(inp)
  * the specified error.  If connection is synchronized,
  * then send a RST to peer.
  */
+// 连接出错，调用tcp_drop发送RST，关闭连接
 struct tcpcb *
 tcp_drop(tp, errno)
 	register struct tcpcb *tp;
@@ -255,7 +258,7 @@ tcp_drop(tp, errno)
 
 	if (TCPS_HAVERCVDSYN(tp->t_state)) {
 		tp->t_state = TCPS_CLOSED;
-		(void) tcp_output(tp);
+		(void) tcp_output(tp); // RST
 		tcpstat.tcps_drops++;
 	} else
 		tcpstat.tcps_conndrops++;
@@ -299,6 +302,9 @@ tcp_close(tp)
 	    ((struct sockaddr_in *)rt_key(rt))->sin_addr.s_addr != INADDR_ANY) {
 		register u_long i;
 
+		// todo: update inpcb.inp_route.ro_rt.rt_metrics by tp
+
+		// update rmx_rtt
 		if ((rt->rt_rmx.rmx_locks & RTV_RTT) == 0) {
 			i = tp->t_srtt *
 			    (RTM_RTTUNIT / (PR_SLOWHZ * TCP_RTT_SCALE));
@@ -314,6 +320,7 @@ tcp_close(tp)
 			else
 				rt->rt_rmx.rmx_rtt = i;
 		}
+		// update rmx_rttvar
 		if ((rt->rt_rmx.rmx_locks & RTV_RTTVAR) == 0) {
 			i = tp->t_rttvar *
 			    (RTM_RTTUNIT / (PR_SLOWHZ * TCP_RTTVAR_SCALE));
@@ -330,6 +337,7 @@ tcp_close(tp)
 		 * before we start updating, then update on both good
 		 * and bad news.
 		 */
+		// update rmx_ssthresh
 		if ((rt->rt_rmx.rmx_locks & RTV_SSTHRESH) == 0 &&
 		    (i = tp->snd_ssthresh) && rt->rt_rmx.rmx_ssthresh ||
 		    i < (rt->rt_rmx.rmx_sendpipe / 2)) {
@@ -349,6 +357,7 @@ tcp_close(tp)
 		}
 	}
 #endif /* RTV_RTT */
+  // 释放资源(未按序接收队列，tcpcb，inpcb)
 	/* free the reassembly queue, if any */
 	t = tp->seg_next;
 	while (t != (struct tcpiphdr *)tp) {

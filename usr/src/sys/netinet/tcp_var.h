@@ -98,6 +98,7 @@ struct tcpcb {
 	tcp_seq	snd_max;		/* highest sequence number sent;
 					 * used to recognize retransmits
 					 */
+  // todo: 拥塞窗口
 /* congestion control (for slow start, source quench, retransmit after loss) */
 	u_long	snd_cwnd;		/* congestion-controlled window */
 	u_long	snd_ssthresh;		/* snd_cwnd size threshhold for
@@ -108,6 +109,7 @@ struct tcpcb {
  * transmit timing stuff.  See below for scale of srtt and rttvar.
  * "Variance" is actually smoothed difference.
  */
+	// RTT计算
 	short	t_idle;			/* inactivity time */ // 没收到对方数据的累计时间
 	short	t_rtt;			/* round trip time */
 	tcp_seq	t_rtseq;		/* sequence number being timed */
@@ -124,6 +126,7 @@ struct tcpcb {
 	short	t_softerror;		/* possible error not yet reported */
 
 /* RFC 1323 variables */
+	// tcp opt: 窗口扩大和时间戳选项
 	u_char	snd_scale;		/* window scaling for send window */
 	u_char	rcv_scale;		/* window scaling for recv window */
 	u_char	request_r_scale;	/* pending window scaling */
