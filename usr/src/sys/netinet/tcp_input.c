@@ -84,6 +84,8 @@ extern u_long sb_max;
  * Set DELACK for segments received in order, but ack immediately
  * when segments are out of order (so fast retransmit can work).
  */
+// 把数据放入重组队列
+// 按顺序到达，重组队列空，ESTABLISH状态，才能直接递交给应用
 #define	TCP_REASS(tp, ti, m, so, flags) { \
 	if ((ti)->ti_seq == (tp)->rcv_nxt && \
 	    (tp)->seg_next == (struct tcpiphdr *)(tp) && \
@@ -1544,12 +1546,14 @@ tcp_mss(tp, offer)
 	ifp = rt->rt_ifp;
 	so = inp->inp_socket;
 
+  // 检查rt.rt_metrics.rmx_mtu是否可用
 #ifdef RTV_MTU	/* if route characteristics exist ... */
 	/*
 	 * While we're here, check if there's an initial rtt
 	 * or rttvar.  Convert from the route-table units
 	 * to scaled multiples of the slow timeout timer.
 	 */
+	// 既然已经得到了rt，就用rt更新tp中的路由信息,rtt信息
 	if (tp->t_srtt == 0 && (rtt = rt->rt_rmx.rmx_rtt)) {
 		/*
 		 * XXX the lock bit for MTU indicates that the value
@@ -1567,7 +1571,7 @@ tcp_mss(tp, offer)
 			    tp->t_srtt * TCP_RTTVAR_SCALE / TCP_RTT_SCALE;
 		TCPT_RANGESET(tp->t_rxtcur,
 		    ((tp->t_srtt >> 2) + tp->t_rttvar) >> 1,
-		    tp->t_rttmin, TCPTV_REXMTMAX);
+		    tp->t_rttmin, TCPTV_REXMTMAX); // 计算tcpcb.rtt
 	}
 	/*
 	 * if there's an mtu associated with the route, use it
@@ -1578,6 +1582,7 @@ tcp_mss(tp, offer)
 #endif /* RTV_MTU */
 	{
 		mss = ifp->if_mtu - sizeof(struct tcpiphdr);
+		// 继续调整mss大小, 调整为MCLBYTES的整数倍
 #if	(MCLBYTES & (MCLBYTES - 1)) == 0
 		if (mss > MCLBYTES)
 			mss &= ~(MCLBYTES-1);
@@ -1585,7 +1590,7 @@ tcp_mss(tp, offer)
 		if (mss > MCLBYTES)
 			mss = mss / MCLBYTES * MCLBYTES;
 #endif
-		if (!in_localaddr(inp->inp_faddr))
+		if (!in_localaddr(inp->inp_faddr)) // 目的ip不是本地地址
 			mss = min(mss, tcp_mssdflt);
 	}
 	/*
@@ -1599,6 +1604,7 @@ tcp_mss(tp, offer)
 	if (offer)
 		mss = min(mss, offer);
 	mss = max(mss, 32);		/* sanity */
+	// 更新收发缓存大小,使他是mss的整数倍
 	if (mss < tp->t_maxseg || offer != 0) {
 		/*
 		 * If there's a pipesize, change the socket buffer
@@ -1633,6 +1639,7 @@ tcp_mss(tp, offer)
 	}
 	tp->snd_cwnd = mss;
 
+	// 更新ssthresh
 #ifdef RTV_SSTHRESH
 	if (rt->rt_rmx.rmx_ssthresh) {
 		/*

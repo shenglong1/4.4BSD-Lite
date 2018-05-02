@@ -58,8 +58,10 @@
 #include <netinet/tcp_timer.h>
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
+#include <stand/stand.h>
 #include "../../../../sys/netinet/tcp_fsm.h"
 #include "../../../../sys/netinet/tcp_var.h"
+#include "../../../../sys/hp300/include/param.h"
 
 /* patchable/settable parameters for tcp */
 int 	tcp_mssdflt = TCP_MSS;
@@ -364,17 +366,17 @@ tcp_close(tp)
 		t = (struct tcpiphdr *)t->ti_next;
 		m = REASS_MBUF((struct tcpiphdr *)t->ti_prev);
 		remque(t->ti_prev);
-		m_freem(m);
+		m_freem(m); // 释放未按序接收队列
 	}
 	if (tp->t_template)
-		(void) m_free(dtom(tp->t_template));
-	free(tp, M_PCB);
+		(void) m_free(dtom(tp->t_template)); // 释放tcpiphdr
+	free(tp, M_PCB); // 释放tcpcb
 	inp->inp_ppcb = 0;
 	soisdisconnected(so);
 	/* clobber input pcb cache if we're closing the cached connection */
 	if (inp == tcp_last_inpcb)
 		tcp_last_inpcb = &tcb;
-	in_pcbdetach(inp);
+	in_pcbdetach(inp); // 释放inpcb
 	tcpstat.tcps_closed++;
 	return ((struct tcpcb *)0);
 }
@@ -410,15 +412,16 @@ tcp_notify(inp, error)
 	      error == EHOSTDOWN)) {
 		return;
 	} else if (tp->t_state < TCPS_ESTABLISHED && tp->t_rxtshift > 3 &&
-	    tp->t_softerror)
-		so->so_error = error;
+	    tp->t_softerror) // 在建立连接前，已经重传了4次
+		so->so_error = error; // 错误记录在socket中，socket层可以获得，告知用户进程
 	else 
-		tp->t_softerror = error;
+		tp->t_softerror = error; // 软错误只是记录在tcpcb中，socket层无法获得
 	wakeup((caddr_t) &so->so_timeo);
 	sorwakeup(so);
 	sowwakeup(so);
 }
 
+// tcp引发的icmp错误到达时，调用这个函数处理
 void
 tcp_ctlinput(cmd, sa, ip)
 	int cmd;
@@ -447,6 +450,7 @@ tcp_ctlinput(cmd, sa, ip)
  * When a source quench is received, close congestion window
  * to one segment.  We will gradually open it again as we proceed.
  */
+// 收到源站抑制icmp，设置tcpcb拥塞窗口为mss
 void
 tcp_quench(inp, errno)
 	struct inpcb *inp;

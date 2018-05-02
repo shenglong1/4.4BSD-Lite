@@ -45,6 +45,7 @@
 
 // inpcb中的控制块,每个sockfd一个
 struct tcpcb {
+    // 指向tcp 未按序接收队列, 即重组队列
 	struct	tcpiphdr *seg_next;	/* sequencing queue */
 	struct	tcpiphdr *seg_prev;
 	short	t_state;		/* state of this connection */
