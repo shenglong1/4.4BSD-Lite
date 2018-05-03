@@ -128,12 +128,15 @@ struct tcpcb {
 
 /* RFC 1323 variables */
 	// tcp opt: 窗口扩大和时间戳选项
-	u_char	snd_scale;		/* window scaling for send window */
-	u_char	rcv_scale;		/* window scaling for recv window */
+    // todo: 窗口始终是对端rwnd决定本端swnd，对端rcv_scale决定本端snd_scale
+    // todo: 所以snd_scale是对端接收窗口的扩展选项
+    // todo: rcv_scale是本端的接收窗口的扩展选项
+	u_char	snd_scale;		/* window scaling for send window */ // 来自对端
+	u_char	rcv_scale;		/* window scaling for recv window */ // 来自本端，通知对端
 	u_char	request_r_scale;	/* pending window scaling */
 	u_char	requested_s_scale;
-	u_long	ts_recent;		/* timestamp echo data */
-	u_long	ts_recent_age;		/* when last updated */
+	u_long	ts_recent;		/* timestamp echo data */ // 记录对端发过来的分组的最大时间戳
+	u_long	ts_recent_age;		/* when last updated */ // 记录ts_recent是什么时候更新的,是个本端时间
 	tcp_seq	last_ack_sent;
 
 /* TUBA stuff */
