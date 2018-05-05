@@ -529,6 +529,7 @@ tcp_input(m, iphlen)
     }
   }
 
+  /*************************** step 3: 缓慢的执行路径,主动打开/被动打开/同时打开处理 *****************************************/
   /*
    * Drop TCP, IP headers and TCP options.
    */
@@ -541,6 +542,7 @@ tcp_input(m, iphlen)
    * Receive window is amount of space in rcv queue,
    * but not less than advertised window.
    */
+  // 重算接收窗口大小
   { int win;
 
     win = sbspace(&so->so_rcv);
@@ -564,6 +566,8 @@ tcp_input(m, iphlen)
      * Enter SYN_RECEIVED state, and process any other fields of this
      * segment in this state.
      */
+      // 完成被动打开
+      // LISTEN状态只能接受SYN
     case TCPS_LISTEN: {
       struct mbuf *am;
       register struct sockaddr_in *sin;
@@ -580,8 +584,9 @@ tcp_input(m, iphlen)
        * packet with M_BCAST not set.
        */
       if (m->m_flags & (M_BCAST|M_MCAST) ||
-          IN_MULTICAST(ti->ti_dst.s_addr))
-        goto drop;
+          IN_MULTICAST(ti->ti_dst.s_addr)) // 判断目标地址是否是D类地址
+        goto drop; // todo: tcp 不支持组播或广播
+      // 分配一个mbuf放src addr
       am = m_get(M_DONTWAIT, MT_SONAME);	/* XXX */
       if (am == NULL)
         goto drop;
@@ -592,18 +597,20 @@ tcp_input(m, iphlen)
       sin->sin_addr = ti->ti_src;
       sin->sin_port = ti->ti_sport;
       bzero((caddr_t)sin->sin_zero, sizeof(sin->sin_zero));
-      laddr = inp->inp_laddr;
+      laddr = inp->inp_laddr; // 暂时保存下inpcb本地ip
       if (inp->inp_laddr.s_addr == INADDR_ANY)
-        inp->inp_laddr = ti->ti_dst;
-      if (in_pcbconnect(inp, am)) {
+        inp->inp_laddr = ti->ti_dst; // inpcb地址设置为对端dst地址
+      if (in_pcbconnect(inp, am)) { // 本地inpcb连接到remoteaddr
         inp->inp_laddr = laddr;
         (void) m_free(am);
         goto drop;
       }
-      (void) m_free(am);
+      (void) m_free(am); // inpcb已经连接到对端，释放mbuf
+
+      // 构造tcpcb中伪首部，处理选项，初始化seq，flag,state,timer
       tp->t_template = tcp_template(tp);
       if (tp->t_template == 0) {
-        tp = tcp_drop(tp, ENOBUFS);
+        tp = tcp_drop(tp, ENOBUFS); // SYN过来，本端创建mbuf失败 ?
         dropsocket = 0;		/* socket is already gone */
         goto drop;
       }
@@ -614,10 +621,10 @@ tcp_input(m, iphlen)
         tp->iss = iss;
       else
         tp->iss = tcp_iss;
-      tcp_iss += TCP_ISSINCR/2;
+      tcp_iss += TCP_ISSINCR/2; // 每次建一个连接，全局seq号都要递增，防止同一个socketpair上两个连接相互干扰
       tp->irs = ti->ti_seq;
-      tcp_sendseqinit(tp);
-      tcp_rcvseqinit(tp);
+      tcp_sendseqinit(tp); // snd_wnd相关参数初始化
+      tcp_rcvseqinit(tp); // rcv_wnd相关参数初始化
       tp->t_flags |= TF_ACKNOW;
       tp->t_state = TCPS_SYN_RECEIVED;
       tp->t_timer[TCPT_KEEP] = TCPTV_KEEP_INIT;
@@ -638,28 +645,32 @@ tcp_input(m, iphlen)
        *	arrange for segment to be acked (eventually)
        *	continue processing rest of data/controls, beginning with URG
        */
+      // 完成主动打开或同时打开
     case TCPS_SYN_SENT:
       if ((tiflags & TH_ACK) &&
           (SEQ_LEQ(ti->ti_ack, tp->iss) ||
            SEQ_GT(ti->ti_ack, tp->snd_max)))
         goto dropwithreset;
-      if (tiflags & TH_RST) {
+      if (tiflags & TH_RST) { // 对端你已经关闭
         if (tiflags & TH_ACK)
           tp = tcp_drop(tp, ECONNREFUSED);
         goto drop;
       }
-      if ((tiflags & TH_SYN) == 0)
+      if ((tiflags & TH_SYN) == 0) // 无论是正常主动打开，或同时打开，收到的必须有SYN
         goto drop;
-      if (tiflags & TH_ACK) {
+      // 正常的SYN|ACK包，初始化本地snd_wnd
+      if (tiflags & TH_ACK) { // ti是SYN|ACK
         tp->snd_una = ti->ti_ack;
         if (SEQ_LT(tp->snd_nxt, tp->snd_una))
           tp->snd_nxt = tp->snd_una;
       }
-      tp->t_timer[TCPT_REXMT] = 0;
+      tp->t_timer[TCPT_REXMT] = 0; // 这里实际是关闭connect计时器
       tp->irs = ti->ti_seq;
-      tcp_rcvseqinit(tp);
+      tcp_rcvseqinit(tp); // 初始化rcv_wnd
       tp->t_flags |= TF_ACKNOW;
-      if (tiflags & TH_ACK && SEQ_GT(tp->snd_una, tp->iss)) {
+
+      if (tiflags & TH_ACK && SEQ_GT(tp->snd_una, tp->iss)) { // 收到的是SYN|ACK，正常主动打开
+        // SYN_SENT进入ESTABLISH状态的操作
         tcpstat.tcps_connects++;
         soisconnected(so);
         tp->t_state = TCPS_ESTABLISHED;
@@ -669,8 +680,9 @@ tcp_input(m, iphlen)
           tp->snd_scale = tp->requested_s_scale;
           tp->rcv_scale = tp->request_r_scale;
         }
+        // 在到达ESTABLISH状态前收到的数据都放在重组队列
         (void) tcp_reass(tp, (struct tcpiphdr *)0,
-                         (struct mbuf *)0);
+                         (struct mbuf *)0); // 初始化重组队列
         /*
          * if we didn't have to retransmit the SYN,
          * use its rtt as our initial srtt & rtt var.
@@ -678,16 +690,17 @@ tcp_input(m, iphlen)
         if (tp->t_rtt)
           tcp_xmit_timer(tp, tp->t_rtt);
       } else
-        tp->t_state = TCPS_SYN_RECEIVED;
+        tp->t_state = TCPS_SYN_RECEIVED; // 同时打开,进入SYN_RCVD
 
     trimthenstep6:
+      // todo: 处理有数据的SYN到达, 包括被动打开，主动打开和同时打开
       /*
        * Advance ti->ti_seq to correspond to first data byte.
        * If data, trim to stay within window,
        * dropping FIN if necessary.
        */
       ti->ti_seq++;
-      if (ti->ti_len > tp->rcv_wnd) {
+      if (ti->ti_len > tp->rcv_wnd) { // 数据过多，丢弃窗口外的
         todrop = ti->ti_len - tp->rcv_wnd;
         m_adj(m, -todrop);
         ti->ti_len = tp->rcv_wnd;
@@ -700,6 +713,7 @@ tcp_input(m, iphlen)
       goto step6;
   }
 
+  /*************************** step 4: PAWS防止回绕 *****************************************/
   /*
    * States other than LISTEN or SYN_SENT.
    * First check timestamp, if present.
@@ -711,10 +725,11 @@ tcp_input(m, iphlen)
    * and it's less than ts_recent, drop it.
    */
   if (ts_present && (tiflags & TH_RST) == 0 && tp->ts_recent &&
-      TSTMP_LT(ts_val, tp->ts_recent)) {
+      TSTMP_LT(ts_val, tp->ts_recent)) { // 当前分组不是最新分组
 
     /* Check to see if ts_recent is over 24 days old.  */
     if ((int)(tcp_now - tp->ts_recent_age) > TCP_PAWS_IDLE) {
+      // 上次更新时间是很久以前了, 时间发生回绕, PAWS测试失效
       /*
        * Invalidate ts_recent.  If this segment updates
        * ts_recent, the age will be reset later and ts_recent
@@ -728,6 +743,7 @@ tcp_input(m, iphlen)
        */
       tp->ts_recent = 0;
     } else {
+      // 没有回绕，确实是个小时间的分组到达
       tcpstat.tcps_rcvduppack++;
       tcpstat.tcps_rcvdupbyte += ti->ti_len;
       tcpstat.tcps_pawsdrop++;
@@ -735,8 +751,11 @@ tcp_input(m, iphlen)
     }
   }
 
+  /*************************** step 5: 裁剪重复data *****************************************/
+  // 裁剪收到的报文
   todrop = tp->rcv_nxt - ti->ti_seq;
   if (todrop > 0) {
+    // todo: 裁剪头
     if (tiflags & TH_SYN) {
       tiflags &= ~TH_SYN;
       ti->ti_seq++;
@@ -747,6 +766,7 @@ tcp_input(m, iphlen)
       todrop--;
     }
     if (todrop >= ti->ti_len) {
+      // 整个报文都是重复的
       tcpstat.tcps_rcvduppack++;
       tcpstat.tcps_rcvdupbyte += ti->ti_len;
       /*
@@ -759,11 +779,13 @@ tcp_input(m, iphlen)
        * In either case, send ACK to resynchronize,
        * but keep on processing for RST or ACK.
        */
-      if ((tiflags & TH_FIN && todrop == ti->ti_len + 1)
+      // todo: 这里需要有自连接的处理
+      if ((tiflags & TH_FIN && todrop == ti->ti_len + 1) // 带有FIN标志的完全重复报文
 #ifdef TCP_COMPAT_42
         || (tiflags & TH_RST && ti->ti_seq == tp->rcv_nxt - 1)
 #endif
               ) {
+        // 丢弃重复的，立刻响应FIN
         todrop = ti->ti_len;
         tiflags &= ~TH_FIN;
         tp->t_flags |= TF_ACKNOW;
@@ -773,13 +795,16 @@ tcp_input(m, iphlen)
          * to itself. Allow packets with a SYN and
          * an ACK to continue with the processing.
          */
+        // 普通的重复报文,即普通重传
         if (todrop != 0 || (tiflags & TH_ACK) == 0)
           goto dropafterack;
       }
     } else {
+      // 非完全重复
       tcpstat.tcps_rcvpartduppack++;
       tcpstat.tcps_rcvpartdupbyte += todrop;
     }
+    // 裁剪头
     m_adj(m, todrop);
     ti->ti_seq += todrop;
     ti->ti_len -= todrop;
@@ -796,7 +821,7 @@ tcp_input(m, iphlen)
    * user processes are gone, then RST the other end.
    */
   if ((so->so_state & SS_NOFDREF) &&
-      tp->t_state > TCPS_CLOSE_WAIT && ti->ti_len) {
+      tp->t_state > TCPS_CLOSE_WAIT && ti->ti_len) { // 奔放正处于关闭状态
     tp = tcp_close(tp);
     tcpstat.tcps_rcvafterclose++;
     goto dropwithreset;
@@ -806,10 +831,13 @@ tcp_input(m, iphlen)
    * If segment ends after window, drop trailing data
    * (and PUSH and FIN); if nothing left, just ACK.
    */
+  // 计算后，A=tp->rcv_nxt + tp->rcv_wnd, [A, A+todrop] 区域是尾部超出的
   todrop = (ti->ti_seq+ti->ti_len) - (tp->rcv_nxt+tp->rcv_wnd);
   if (todrop > 0) {
+    // 裁剪尾
     tcpstat.tcps_rcvpackafterwin++;
     if (todrop >= ti->ti_len) {
+      // 完全超出
       tcpstat.tcps_rcvbyteafterwin += ti->ti_len;
       /*
        * If a new connection request is received
@@ -817,6 +845,7 @@ tcp_input(m, iphlen)
        * and start over if the sequence numbers
        * are above the previous ones.
        */
+      // 在TIME_WAIT下收到新建连接的SYN
       if (tiflags & TH_SYN &&
           tp->t_state == TCPS_TIME_WAIT &&
           SEQ_GT(ti->ti_seq, tp->rcv_nxt)) {
@@ -831,18 +860,19 @@ tcp_input(m, iphlen)
        * remember to ack.  Otherwise, drop segment
        * and ack.
        */
-      if (tp->rcv_wnd == 0 && ti->ti_seq == tp->rcv_nxt) {
+      if (tp->rcv_wnd == 0 && ti->ti_seq == tp->rcv_nxt) { // 窗口已经0，但还收到数据，立即ack通告窗口
         tp->t_flags |= TF_ACKNOW;
         tcpstat.tcps_rcvwinprobe++;
       } else
-        goto dropafterack;
-    } else
+        goto dropafterack; // 普通的data 完全超出
+    } else // 非完全超出
       tcpstat.tcps_rcvbyteafterwin += todrop;
     m_adj(m, -todrop);
     ti->ti_len -= todrop;
     tiflags &= ~(TH_PUSH|TH_FIN);
   }
 
+  /*************************** step 6: 记录时间戳 *****************************************/
   /*
    * If last ACK falls within this segment's sequence numbers,
    * record its timestamp.
@@ -854,6 +884,7 @@ tcp_input(m, iphlen)
     tp->ts_recent = ts_val;
   }
 
+  /*************************** step 7: RST处理 *****************************************/
   /*
    * If the RST bit is set examine the state:
    *    SYN_RECEIVED STATE:
@@ -864,12 +895,14 @@ tcp_input(m, iphlen)
    *    CLOSING, LAST_ACK, TIME_WAIT STATES
    *	Close the tcb.
    */
+  // 收到RST，根据当前状态判断下一状态，并决定是否notify 应用，通过so->so_error通知应用
   if (tiflags&TH_RST) switch (tp->t_state) {
 
       case TCPS_SYN_RECEIVED:
         so->so_error = ECONNREFUSED;
         goto close;
 
+        // 关闭的中间态，close，notify reset
       case TCPS_ESTABLISHED:
       case TCPS_FIN_WAIT_1:
       case TCPS_FIN_WAIT_2:
@@ -881,6 +914,7 @@ tcp_input(m, iphlen)
         tp = tcp_close(tp);
         goto drop;
 
+        // 关闭最终态，close
       case TCPS_CLOSING:
       case TCPS_LAST_ACK:
       case TCPS_TIME_WAIT:
